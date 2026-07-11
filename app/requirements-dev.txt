@@ -1,0 +1,5 @@
+# Dependencias de desarrollo/test (scaffold — pinear al implementar).
+-r requirements.txt
+
+pytest
+ruff

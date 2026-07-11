@@ -1,0 +1,85 @@
+"""Tests de integración de los repos contra Postgres real.
+
+Se SALTAN automáticamente si no hay una DB alcanzable (ej: corriendo localmente
+fuera de la red de compose). Verifican el schema/seed de las migraciones y el
+roundtrip de escritura. Limpian sus propias filas con marcadores sintéticos.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+from datetime import UTC, datetime
+
+import pytest
+from sqlalchemy import Engine, create_engine, text
+
+from portfolio_monitor.config import get_settings
+from portfolio_monitor.db.repositories import (
+    DataSourceHealthRepository,
+    PricePoint,
+    PriceRepository,
+    TickerConfigRepository,
+)
+
+
+@pytest.fixture(scope="module")
+def engine() -> Iterator[Engine]:
+    settings = get_settings()
+    try:
+        # create_engine importa el driver (psycopg) de forma eager: si falta,
+        # también debe traducirse a skip, no a error.
+        eng = create_engine(settings.sqlalchemy_url, future=True)
+        with eng.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as exc:  # noqa: BLE001 - driver ausente o DB inalcanzable → skip
+        pytest.skip(f"Postgres no disponible: {exc}")
+    yield eng
+    eng.dispose()
+
+
+def test_enabled_tickers_reflects_seed(engine: Engine) -> None:
+    tickers = TickerConfigRepository(engine).enabled_tickers()
+    assert "NVDA" in tickers              # US habilitado
+    assert "RHM.DE" not in tickers        # europeo (fase 2) deshabilitado
+
+
+def test_price_insert_roundtrip(engine: Engine) -> None:
+    repo = PriceRepository(engine)
+    marker = "__TEST_TICKER__"
+    ts = datetime(2000, 1, 1, tzinfo=UTC)
+    try:
+        assert repo.insert_many([
+            PricePoint(ticker=marker, ts=ts, price=1.23, source="test")
+        ]) == 1
+        # idempotencia: reinsertar el mismo (ticker, ts) no rompe
+        repo.insert_many([PricePoint(ticker=marker, ts=ts, price=9.99, source="test")])
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT price FROM prices WHERE ticker = :t AND ts = :ts"),
+                {"t": marker, "ts": ts},
+            ).one()
+        assert float(row.price) == 1.23   # ON CONFLICT DO NOTHING preservó el original
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM prices WHERE ticker = :t"), {"t": marker})
+
+
+def test_health_record_roundtrip(engine: Engine) -> None:
+    marker = "__test_source__"
+    try:
+        DataSourceHealthRepository(engine).record(marker, "up", latency_ms=42)
+        with engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT status, latency_ms FROM data_source_health "
+                    "WHERE source = :s ORDER BY ts DESC LIMIT 1"
+                ),
+                {"s": marker},
+            ).one()
+        assert row.status == "up"
+        assert row.latency_ms == 42
+    finally:
+        with engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM data_source_health WHERE source = :s"), {"s": marker}
+            )

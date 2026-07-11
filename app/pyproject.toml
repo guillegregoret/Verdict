@@ -1,0 +1,15 @@
+# Config de tooling (tests + lint). Las deps de runtime siguen en requirements.txt
+# y las de test en requirements-dev.txt.
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]      # layout src/: hace importable `portfolio_monitor`
+testpaths = ["tests"]
+addopts = "-ra -q"
+
+[tool.ruff]
+src = ["src", "tests"]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "W"]

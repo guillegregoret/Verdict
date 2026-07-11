@@ -1,0 +1,21 @@
+# ── Dependencias de la app (scaffold — pinear versiones al implementar) ──────
+# Broker (read-only). NO usar ib_insync (deprecado).
+ib_async
+
+# HTTP para clientes de datos (Finnhub, EDGAR/FMP, Telegram)
+httpx
+
+# Postgres / TimescaleDB
+psycopg[binary]
+SQLAlchemy
+
+# Razonamiento
+anthropic
+
+# Config / entorno
+pydantic
+pydantic-settings
+python-dotenv
+
+# Scheduler
+APScheduler
