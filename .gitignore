@@ -24,9 +24,11 @@ build/
 htmlcov/
 
 # ── Docker / datos locales ───────────────────────────────────────────────────
-data/
-volumes/
-pgdata/
+# Anclados a la raíz del repo (con `/`): si no, `data/` también ignoraría el
+# paquete Python app/src/portfolio_monitor/data/.
+/data/
+/volumes/
+/pgdata/
 
 # ── IDE / OS ─────────────────────────────────────────────────────────────────
 .idea/

@@ -14,12 +14,27 @@ import pytest
 from sqlalchemy import Engine, create_engine, text
 
 from portfolio_monitor.config import get_settings
+from portfolio_monitor.data.ibkr import Position
 from portfolio_monitor.db.repositories import (
+    DEFAULT_VERDICT,
     DataSourceHealthRepository,
+    HoldingsRepository,
     PricePoint,
     PriceRepository,
     TickerConfigRepository,
 )
+
+
+def _fetch_holding(engine: Engine, ibkr_id: str, ticker: str):
+    with engine.connect() as conn:
+        return conn.execute(
+            text(
+                "SELECT h.shares, h.avg_cost, h.verdict FROM holdings h "
+                "JOIN accounts a ON a.id = h.account_id "
+                "WHERE a.ibkr_id = :i AND h.ticker = :t"
+            ),
+            {"i": ibkr_id, "t": ticker},
+        ).one_or_none()
 
 
 @pytest.fixture(scope="module")
@@ -83,3 +98,47 @@ def test_health_record_roundtrip(engine: Engine) -> None:
             conn.execute(
                 text("DELETE FROM data_source_health WHERE source = :s"), {"s": marker}
             )
+
+
+def test_holdings_upsert_preserves_verdict(engine: Engine) -> None:
+    repo = HoldingsRepository(engine)
+    # NVDA está seedeado en U22106929 con verdict 'Mantener' y shares NULL.
+    assert _fetch_holding(engine, "U22106929", "NVDA") is not None
+    try:
+        applied = repo.upsert_positions(
+            [Position("U22106929", "NVDA", 12.0, 456.7, company="NVIDIA")]
+        )
+        assert applied == 1
+        row = _fetch_holding(engine, "U22106929", "NVDA")
+        assert float(row.shares) == 12.0
+        assert float(row.avg_cost) == 456.7
+        assert row.verdict == "Mantener"  # config preservada, NO DEFAULT_VERDICT
+    finally:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE holdings SET shares = NULL, avg_cost = NULL "
+                    "WHERE ticker = 'NVDA' AND account_id = "
+                    "(SELECT id FROM accounts WHERE ibkr_id = 'U22106929')"
+                )
+            )
+
+
+def test_holdings_upsert_new_ticker_gets_default_verdict(engine: Engine) -> None:
+    repo = HoldingsRepository(engine)
+    marker = "__ZZTEST__"
+    try:
+        assert repo.upsert_positions(
+            [Position("U22106929", marker, 1.0, 2.0, company="Test Co")]
+        ) == 1
+        row = _fetch_holding(engine, "U22106929", marker)
+        assert row.verdict == DEFAULT_VERDICT
+        assert float(row.shares) == 1.0
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM holdings WHERE ticker = :t"), {"t": marker})
+
+
+def test_holdings_upsert_unknown_account_is_ignored(engine: Engine) -> None:
+    repo = HoldingsRepository(engine)
+    assert repo.upsert_positions([Position("U00000000", "ZZZ", 1.0, 2.0)]) == 0
