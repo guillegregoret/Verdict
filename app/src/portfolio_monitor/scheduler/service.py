@@ -24,15 +24,24 @@ class PipelineLike(Protocol):
     def run_once(self) -> int: ...
 
 
+class PingerLike(Protocol):
+    def ping(self, success: bool = ...) -> None: ...
+
+
 class Scheduler:
     """Orquesta poller + pipeline en un loop periódico."""
 
     def __init__(
-        self, settings: Settings, poller: PollerLike, pipeline: PipelineLike
+        self,
+        settings: Settings,
+        poller: PollerLike,
+        pipeline: PipelineLike,
+        pinger: PingerLike | None = None,
     ) -> None:
         self._settings = settings
         self._poller = poller
         self._pipeline = pipeline
+        self._pinger = pinger
 
     def tick(self) -> None:
         """Un ciclo: pollea precios y luego evalúa/notifica."""
@@ -40,7 +49,10 @@ class Scheduler:
         self._pipeline.run_once()
 
     def run_forever(self) -> None:
-        """Loop principal. Un tick que falla no mata el proceso."""
+        """Loop principal. Un tick que falla no mata el proceso.
+
+        Pinga el dead-man's switch (§9) con éxito/fallo según el resultado del tick.
+        """
         interval = self._settings.poll_interval_seconds
         logger.info("Scheduler arrancado (intervalo=%ss).", interval)
         while True:
@@ -48,4 +60,11 @@ class Scheduler:
                 self.tick()
             except Exception:  # noqa: BLE001 - un tick no debe tumbar el proceso
                 logger.exception("Tick del scheduler falló.")
+                self._safe_ping(success=False)
+            else:
+                self._safe_ping(success=True)
             time.sleep(interval)
+
+    def _safe_ping(self, success: bool) -> None:
+        if self._pinger is not None:
+            self._pinger.ping(success=success)

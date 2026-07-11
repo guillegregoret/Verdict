@@ -11,6 +11,7 @@ from .config import Settings, get_settings
 from .data.finnhub import FinnhubClient
 from .db.engine import get_engine
 from .logging import get_logger, setup_logging
+from .monitoring import HealthcheckPinger
 from .notifier import TelegramNotifier
 from .poller import PricePoller
 from .reasoning import AnthropicReasoner, ReasoningService, TemplateReasoner
@@ -37,13 +38,16 @@ def main() -> None:
     with (
         FinnhubClient(settings) as finnhub,
         TelegramNotifier(settings) as notifier,
+        HealthcheckPinger(settings) as pinger,
     ):
         poller = PricePoller.from_engine(
             settings=settings, engine=engine, quotes=finnhub
         )
         reasoning = _build_reasoning(settings)
         pipeline = AlertPipeline.from_engine(engine, reasoning, notifier)
-        Scheduler(settings=settings, poller=poller, pipeline=pipeline).run_forever()
+        Scheduler(
+            settings=settings, poller=poller, pipeline=pipeline, pinger=pinger
+        ).run_forever()
 
 
 if __name__ == "__main__":

@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     telegram_chat_id: str = ""
     telegram_base_url: str = "https://api.telegram.org"
 
+    # ── Monitoreo (§9) ───────────────────────────────────────────────────────
+    # Dead-man's switch: la app pinga esta URL cada tick. Si deja de pingar → aviso.
+    healthchecks_ping_url: str = ""
+
     # ── IB Gateway (🔴 READ-ONLY) ────────────────────────────────────────────
     # El cliente se conecta con readonly=True; el gateway además corre con
     # READ_ONLY_API=yes. Doble red de seguridad: nunca puede operar.
