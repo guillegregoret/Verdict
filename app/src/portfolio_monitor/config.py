@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     fmp_api_key: str = ""
     fmp_base_url: str = "https://financialmodelingprep.com/api/v3"
 
+    # ── Anthropic (razonamiento) ─────────────────────────────────────────────
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-opus-4-8"
+
     # ── IB Gateway (🔴 READ-ONLY) ────────────────────────────────────────────
     # El cliente se conecta con readonly=True; el gateway además corre con
     # READ_ONLY_API=yes. Doble red de seguridad: nunca puede operar.
