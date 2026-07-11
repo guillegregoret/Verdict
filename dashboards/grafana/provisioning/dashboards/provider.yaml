@@ -1,0 +1,14 @@
+# Provider de dashboards: Grafana carga los .json de este directorio (§10).
+apiVersion: 1
+
+providers:
+  - name: Verdict
+    orgId: 1
+    folder: Verdict
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

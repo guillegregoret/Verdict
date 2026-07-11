@@ -9,8 +9,16 @@ activo y **avisa por Telegram** con una sugerencia contextualizada.
 
 ## Estado
 
-**Scaffold** — estructura, `docker-compose.yml`, `.env.example` y migraciones de
-Postgres. Sin lógica implementada todavía (ver roadmap en `CLAUDE.md` §11).
+**Loop completo end-to-end.** Los 9 módulos del roadmap (`CLAUDE.md` §11) están
+implementados y testeados: data layer (Finnhub → precios), gateway IBKR read-only
+(sync de holdings), trigger engine + Verdict Gate + cooldown, fundamentals (FMP),
+reasoning (Anthropic con fallback a template), notifier (Telegram), monitoreo
+(dead-man's switch + status.json) y dashboards (Grafana provisionado sobre Postgres).
+
+El `main.py` arranca el scheduler: cada tick pollea precios → detecta caídas →
+razona → notifica por Telegram. Suite verde (83 tests). Pendientes: cablear el
+sync de holdings de IBKR al loop (requiere gateway + 2FA) y los blindajes de §8
+(digests + Trivy).
 
 ## Estructura
 

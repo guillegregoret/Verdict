@@ -1,0 +1,20 @@
+# Datasource de Grafana → Postgres/TimescaleDB (§10).
+# Credenciales interpoladas desde el entorno del contenedor (ver docker-compose).
+apiVersion: 1
+
+datasources:
+  - name: Verdict Postgres
+    uid: verdict-postgres
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    user: ${POSTGRES_USER}
+    database: ${POSTGRES_DB}
+    isDefault: true
+    editable: false
+    secureJsonData:
+      password: ${POSTGRES_PASSWORD}
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: true

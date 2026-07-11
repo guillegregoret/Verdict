@@ -1,0 +1,86 @@
+{
+  "uid": "verdict-overview",
+  "title": "Verdict — Overview",
+  "tags": ["verdict"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "ticker",
+        "label": "Ticker",
+        "type": "query",
+        "datasource": { "type": "postgres", "uid": "verdict-postgres" },
+        "query": "SELECT DISTINCT ticker FROM ticker_config WHERE enabled ORDER BY 1",
+        "refresh": 1,
+        "includeAll": false,
+        "current": {}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Último precio por ticker",
+      "type": "table",
+      "datasource": { "type": "postgres", "uid": "verdict-postgres" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT DISTINCT ON (ticker) ticker, price, ts FROM prices ORDER BY ticker, ts DESC"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Precio de $ticker",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "verdict-postgres" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT ts AS \"time\", price FROM prices WHERE ticker = '$ticker' ORDER BY ts"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Alertas recientes",
+      "type": "table",
+      "datasource": { "type": "postgres", "uid": "verdict-postgres" },
+      "gridPos": { "h": 9, "w": 14, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT ts, ticker, pct_change, verdict, suggestion FROM alerts ORDER BY ts DESC LIMIT 50"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Salud de fuentes de datos",
+      "type": "table",
+      "datasource": { "type": "postgres", "uid": "verdict-postgres" },
+      "gridPos": { "h": 9, "w": 10, "x": 14, "y": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT DISTINCT ON (source) source, status, latency_ms, ts FROM data_source_health ORDER BY source, ts DESC"
+        }
+      ]
+    }
+  ]
+}
