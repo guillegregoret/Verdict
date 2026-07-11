@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-opus-4-8"
 
+    # ── Telegram (notificaciones) ────────────────────────────────────────────
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+    telegram_base_url: str = "https://api.telegram.org"
+
     # ── IB Gateway (🔴 READ-ONLY) ────────────────────────────────────────────
     # El cliente se conecta con readonly=True; el gateway además corre con
     # READ_ONLY_API=yes. Doble red de seguridad: nunca puede operar.
