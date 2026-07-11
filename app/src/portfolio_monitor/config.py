@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     poll_interval_seconds: int = 60
     finnhub_request_spacing_seconds: float = 1.1
 
+    # ── Fundamentals (FMP) ───────────────────────────────────────────────────
+    # Provider autoritativo de fundamentals (§3). El definitivo está abierto
+    # (§13: EDGAR vs FMP vs Finnhub); arrancamos con FMP por su REST de ratios.
+    fmp_api_key: str = ""
+    fmp_base_url: str = "https://financialmodelingprep.com/api/v3"
+
     # ── IB Gateway (🔴 READ-ONLY) ────────────────────────────────────────────
     # El cliente se conecta con readonly=True; el gateway además corre con
     # READ_ONLY_API=yes. Doble red de seguridad: nunca puede operar.

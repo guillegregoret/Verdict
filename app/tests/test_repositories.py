@@ -14,11 +14,13 @@ import pytest
 from sqlalchemy import Engine, create_engine, text
 
 from portfolio_monitor.config import get_settings
+from portfolio_monitor.data.edgar_fmp import Fundamentals
 from portfolio_monitor.data.ibkr import Position
 from portfolio_monitor.db.repositories import (
     DEFAULT_VERDICT,
     AlertRepository,
     DataSourceHealthRepository,
+    FundamentalsRepository,
     HoldingsRepository,
     PricePoint,
     PriceRepository,
@@ -194,3 +196,47 @@ def test_alert_record_and_cooldown_roundtrip(engine: Engine) -> None:
     finally:
         with engine.begin() as conn:
             conn.execute(text("DELETE FROM alerts WHERE ticker = :t"), {"t": marker})
+
+
+def test_fundamentals_snapshot_and_latest(engine: Engine) -> None:
+    repo = FundamentalsRepository(engine)
+    marker = "__FUNDZ__"
+    t0 = datetime(2003, 1, 1, tzinfo=UTC)
+    t1 = datetime(2003, 6, 1, tzinfo=UTC)
+    try:
+        repo.insert_snapshot(
+            Fundamentals(marker, 10.0, 0.1, 0.5, 0.3, {"v": 1}, "fmp"), ts=t0
+        )
+        repo.insert_snapshot(
+            Fundamentals(marker, 12.0, 0.2, 0.6, 0.4, {"v": 2}, "fmp"), ts=t1
+        )
+        latest = repo.latest(marker)
+        assert latest is not None
+        assert latest.ts == t1              # devuelve el más reciente
+        assert latest.pe == 12.0
+        assert latest.revenue_growth == 0.2
+        assert repo.latest("__NOPE__") is None
+    finally:
+        with engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM fundamentals WHERE ticker = :t"), {"t": marker}
+            )
+
+
+def test_fundamentals_snapshot_handles_null_metrics(engine: Engine) -> None:
+    repo = FundamentalsRepository(engine)
+    marker = "__FNULLZ__"
+    ts = datetime(2004, 1, 1, tzinfo=UTC)
+    try:
+        repo.insert_snapshot(
+            Fundamentals(marker, None, None, None, None, {}, "fmp"), ts=ts
+        )
+        latest = repo.latest(marker)
+        assert latest is not None
+        assert latest.pe is None
+        assert latest.debt_to_equity is None
+    finally:
+        with engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM fundamentals WHERE ticker = :t"), {"t": marker}
+            )

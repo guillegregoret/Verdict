@@ -6,10 +6,11 @@ Cubre el data layer (§11.2: tickers, precios, salud) y el sync del gateway
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Protocol
+from datetime import UTC, datetime
+from typing import Any, Protocol
 
 from sqlalchemy import Engine, text
 
@@ -254,6 +255,94 @@ class AlertRepository:
                     "bucket_remaining": bucket_remaining,
                 },
             ).scalar_one()
+
+
+class FundamentalsLike(Protocol):
+    """Forma estructural de un snapshot de fundamentals (evita acoplar db → data)."""
+
+    ticker: str
+    pe: float | None
+    revenue_growth: float | None
+    gross_margin: float | None
+    debt_to_equity: float | None
+    raw: dict[str, Any]
+    source: str
+
+
+@dataclass(frozen=True)
+class FundamentalsRow:
+    """Snapshot leído de la tabla `fundamentals` (sin el raw)."""
+
+    ticker: str
+    ts: datetime
+    pe: float | None
+    revenue_growth: float | None
+    gross_margin: float | None
+    debt_to_equity: float | None
+
+
+class FundamentalsRepository:
+    """Persistencia y lectura de snapshots de fundamentals (§5.3, §11.5)."""
+
+    def __init__(self, engine: Engine) -> None:
+        self._engine = engine
+
+    def insert_snapshot(
+        self, fundamentals: FundamentalsLike, ts: datetime | None = None
+    ) -> None:
+        """Guarda un snapshot; ignora duplicados por (ticker, ts)."""
+        stmt = text(
+            """
+            INSERT INTO fundamentals
+                (ticker, ts, pe, revenue_growth, gross_margin, debt_to_equity,
+                 raw, source)
+            VALUES
+                (:ticker, :ts, :pe, :revenue_growth, :gross_margin, :debt_to_equity,
+                 CAST(:raw AS jsonb), :source)
+            ON CONFLICT (ticker, ts) DO NOTHING
+            """
+        )
+        with self._engine.begin() as conn:
+            conn.execute(
+                stmt,
+                {
+                    "ticker": fundamentals.ticker,
+                    "ts": ts or datetime.now(UTC),
+                    "pe": fundamentals.pe,
+                    "revenue_growth": fundamentals.revenue_growth,
+                    "gross_margin": fundamentals.gross_margin,
+                    "debt_to_equity": fundamentals.debt_to_equity,
+                    "raw": json.dumps(fundamentals.raw),
+                    "source": fundamentals.source,
+                },
+            )
+
+    def latest(self, ticker: str) -> FundamentalsRow | None:
+        """Último snapshot de fundamentals de un ticker (para el §5.3)."""
+        stmt = text(
+            """
+            SELECT ticker, ts, pe, revenue_growth, gross_margin, debt_to_equity
+            FROM fundamentals WHERE ticker = :t ORDER BY ts DESC LIMIT 1
+            """
+        )
+        with self._engine.connect() as conn:
+            row = conn.execute(stmt, {"t": ticker}).one_or_none()
+        if row is None:
+            return None
+        return FundamentalsRow(
+            ticker=row.ticker,
+            ts=row.ts,
+            pe=float(row.pe) if row.pe is not None else None,
+            revenue_growth=(
+                float(row.revenue_growth) if row.revenue_growth is not None else None
+            ),
+            gross_margin=(
+                float(row.gross_margin) if row.gross_margin is not None else None
+            ),
+            debt_to_equity=(
+                float(row.debt_to_equity) if row.debt_to_equity is not None else None
+            ),
+        )
 
 
 class DataSourceHealthRepository:
