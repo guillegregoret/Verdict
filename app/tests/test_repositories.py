@@ -17,6 +17,7 @@ from portfolio_monitor.config import get_settings
 from portfolio_monitor.data.ibkr import Position
 from portfolio_monitor.db.repositories import (
     DEFAULT_VERDICT,
+    AlertRepository,
     DataSourceHealthRepository,
     HoldingsRepository,
     PricePoint,
@@ -142,3 +143,54 @@ def test_holdings_upsert_new_ticker_gets_default_verdict(engine: Engine) -> None
 def test_holdings_upsert_unknown_account_is_ignored(engine: Engine) -> None:
     repo = HoldingsRepository(engine)
     assert repo.upsert_positions([Position("U00000000", "ZZZ", 1.0, 2.0)]) == 0
+
+
+def test_enabled_configs_uses_seed_defaults(engine: Engine) -> None:
+    by_ticker = {c.ticker: c for c in TickerConfigRepository(engine).enabled_configs()}
+    assert "NVDA" in by_ticker
+    assert by_ticker["NVDA"].threshold_pct == -4.5      # default de la migración
+    assert by_ticker["NVDA"].window_minutes == 390
+
+
+def test_verdicts_by_ticker_includes_seed(engine: Engine) -> None:
+    verdicts = HoldingsRepository(engine).verdicts_by_ticker()
+    assert verdicts.get("NVDA") == "Mantener"
+    assert verdicts.get("GOOG") == "Crecer"
+
+
+def test_price_latest_and_reference(engine: Engine) -> None:
+    repo = PriceRepository(engine)
+    marker = "__PZ__"
+    t0 = datetime(2001, 1, 1, 0, 0, tzinfo=UTC)
+    t1 = datetime(2001, 1, 1, 1, 0, tzinfo=UTC)
+    try:
+        repo.insert_many([
+            PricePoint(marker, t0, 100.0, "test"),
+            PricePoint(marker, t1, 90.0, "test"),
+        ])
+        assert repo.latest_price(marker) == 90.0
+        assert repo.reference_price(marker, t0) == 100.0
+        assert repo.latest_price("__NOPE__") is None
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM prices WHERE ticker = :t"), {"t": marker})
+
+
+def test_alert_record_and_cooldown_roundtrip(engine: Engine) -> None:
+    repo = AlertRepository(engine)
+    marker = "__ALRTZ__"
+    since = datetime(2000, 1, 1, tzinfo=UTC)
+    try:
+        alert_id = repo.record(
+            ticker=marker,
+            trigger_type="drop_pct",
+            pct_change=-5.0,
+            window_minutes=390,
+            verdict="Mantener",
+            suggestion="test",
+        )
+        assert alert_id > 0
+        assert marker in repo.alerted_tickers_since(since)
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM alerts WHERE ticker = :t"), {"t": marker})

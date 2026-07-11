@@ -32,6 +32,15 @@ class PricePoint:
     source: str
 
 
+@dataclass(frozen=True)
+class TickerConfig:
+    """Config de trigger de un ticker (umbral + ventana)."""
+
+    ticker: str
+    threshold_pct: float
+    window_minutes: int
+
+
 class TickerConfigRepository:
     """Lectura de la config de triggers por ticker."""
 
@@ -45,6 +54,22 @@ class TickerConfigRepository:
         )
         with self._engine.connect() as conn:
             return [row.ticker for row in conn.execute(stmt)]
+
+    def enabled_configs(self) -> list[TickerConfig]:
+        """Config completa (umbral/ventana) de los tickers habilitados."""
+        stmt = text(
+            "SELECT ticker, threshold_pct, window_minutes FROM ticker_config "
+            "WHERE enabled = true ORDER BY ticker"
+        )
+        with self._engine.connect() as conn:
+            return [
+                TickerConfig(
+                    ticker=r.ticker,
+                    threshold_pct=float(r.threshold_pct),
+                    window_minutes=int(r.window_minutes),
+                )
+                for r in conn.execute(stmt)
+            ]
 
 
 class PriceRepository:
@@ -75,6 +100,25 @@ class PriceRepository:
         with self._engine.begin() as conn:
             conn.execute(stmt, rows)
         return len(rows)
+
+    def latest_price(self, ticker: str) -> float | None:
+        """Último precio conocido de un ticker (o None si no hay datos)."""
+        stmt = text(
+            "SELECT price FROM prices WHERE ticker = :t ORDER BY ts DESC LIMIT 1"
+        )
+        with self._engine.connect() as conn:
+            row = conn.execute(stmt, {"t": ticker}).one_or_none()
+        return float(row.price) if row else None
+
+    def reference_price(self, ticker: str, since: datetime) -> float | None:
+        """Primer precio en la ventana [since, now] — referencia del % de cambio."""
+        stmt = text(
+            "SELECT price FROM prices WHERE ticker = :t AND ts >= :since "
+            "ORDER BY ts ASC LIMIT 1"
+        )
+        with self._engine.connect() as conn:
+            row = conn.execute(stmt, {"t": ticker, "since": since}).one_or_none()
+        return float(row.price) if row else None
 
 
 class PositionLike(Protocol):
@@ -153,6 +197,63 @@ class HoldingsRepository:
             if rows:
                 conn.execute(stmt, rows)
         return len(rows)
+
+    def verdicts_by_ticker(self) -> dict[str, str]:
+        """Mapa {ticker: verdict} para el Verdict Gate (§4)."""
+        with self._engine.connect() as conn:
+            return {
+                r.ticker: r.verdict
+                for r in conn.execute(text("SELECT ticker, verdict FROM holdings"))
+            }
+
+
+class AlertRepository:
+    """Auditoría de alertas emitidas + soporte de cooldown (§5.5)."""
+
+    def __init__(self, engine: Engine) -> None:
+        self._engine = engine
+
+    def alerted_tickers_since(self, since: datetime) -> set[str]:
+        """Tickers con alguna alerta desde `since` (para el cooldown)."""
+        stmt = text("SELECT DISTINCT ticker FROM alerts WHERE ts >= :since")
+        with self._engine.connect() as conn:
+            return {r.ticker for r in conn.execute(stmt, {"since": since})}
+
+    def record(
+        self,
+        ticker: str,
+        trigger_type: str,
+        pct_change: float,
+        window_minutes: int,
+        verdict: str,
+        suggestion: str | None = None,
+        bucket_remaining: float | None = None,
+    ) -> int:
+        """Persiste una alerta emitida. Devuelve el id generado."""
+        stmt = text(
+            """
+            INSERT INTO alerts
+                (ticker, trigger_type, pct_change, window_minutes, verdict,
+                 suggestion, bucket_remaining)
+            VALUES
+                (:ticker, :trigger_type, :pct_change, :window_minutes, :verdict,
+                 :suggestion, :bucket_remaining)
+            RETURNING id
+            """
+        )
+        with self._engine.begin() as conn:
+            return conn.execute(
+                stmt,
+                {
+                    "ticker": ticker,
+                    "trigger_type": trigger_type,
+                    "pct_change": pct_change,
+                    "window_minutes": window_minutes,
+                    "verdict": verdict,
+                    "suggestion": suggestion,
+                    "bucket_remaining": bucket_remaining,
+                },
+            ).scalar_one()
 
 
 class DataSourceHealthRepository:
