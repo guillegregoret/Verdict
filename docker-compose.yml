@@ -42,7 +42,7 @@ services:
 
   # ── IB Gateway: posiciones + fundamentals. 🔴 READ_ONLY_API=yes ─────────────
   ib-gateway:
-    image: ghcr.io/gnzsnz/ib-gateway:10.30.1t
+    image: ghcr.io/gnzsnz/ib-gateway:10.48.1d
     restart: unless-stopped
     environment:
       TWS_USERID: ${TWS_USERID}
@@ -54,7 +54,8 @@ services:
     # Puertos 4001/4002 solo alcanzables dentro de la red `internal`.
     # NUNCA publicar 4001/4002 al host público.
     networks:
-      - internal
+      - internal                     # → app le habla la API por acá
+      - egress                       # → IBKR auth + market data (gdc*.ibllc.com)
     security_opt:
       - no-new-privileges:true
 

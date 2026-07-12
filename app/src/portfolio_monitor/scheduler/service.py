@@ -28,6 +28,10 @@ class PingerLike(Protocol):
     def ping(self, success: bool = ...) -> None: ...
 
 
+class HoldingsSyncLike(Protocol):
+    def run_once(self) -> int: ...
+
+
 class Scheduler:
     """Orquesta poller + pipeline en un loop periódico."""
 
@@ -37,16 +41,32 @@ class Scheduler:
         poller: PollerLike,
         pipeline: PipelineLike,
         pinger: PingerLike | None = None,
+        holdings_sync: HoldingsSyncLike | None = None,
     ) -> None:
         self._settings = settings
         self._poller = poller
         self._pipeline = pipeline
         self._pinger = pinger
+        self._holdings_sync = holdings_sync
+        self._ticks = 0
 
     def tick(self) -> None:
-        """Un ciclo: pollea precios y luego evalúa/notifica."""
+        """Un ciclo: sync de holdings (throttleado) → pollea precios → evalúa/notifica."""
+        self._maybe_sync_holdings()
         self._poller.poll_once()
         self._pipeline.run_once()
+
+    def _maybe_sync_holdings(self) -> None:
+        """Sincroniza holdings 1 cada N ticks (config). Aislado: nunca tumba el tick."""
+        every = self._settings.holdings_sync_every_ticks
+        if self._holdings_sync is None or every <= 0:
+            return
+        if self._ticks % every == 0:  # primer tick incluido → puebla al arrancar
+            try:
+                self._holdings_sync.run_once()
+            except Exception:  # noqa: BLE001 - el sync no debe abortar poll/pipeline
+                logger.exception("Holdings sync falló (se continúa con el tick).")
+        self._ticks += 1
 
     def run_forever(self) -> None:
         """Loop principal. Un tick que falla no mata el proceso.

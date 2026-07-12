@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     ib_gateway_host: str = "ib-gateway"
     ib_gateway_port: int = 4002        # 4002 = paper, 4001 = live (ambos read-only)
     ib_gateway_client_id: int = 1
+    # Cadencia del sync de holdings: 1 cada N ticks (las posiciones cambian lento;
+    # no reconectar al gateway en cada barrido). 0 = deshabilitado.
+    holdings_sync_every_ticks: int = 60
 
     @property
     def sqlalchemy_url(self) -> str:

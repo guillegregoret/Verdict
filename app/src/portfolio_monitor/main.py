@@ -1,8 +1,8 @@
 """Entrypoint del monolito: arranca el scheduler que corre el loop completo (§2).
 
-Cada tick: price poller → trigger → fundamentals → reasoning → Telegram.
-El sync de holdings desde IBKR (§11.3) se orquestará aparte (requiere el gateway
-con 2FA) — todavía no está cableado acá.
+Cada tick: (sync de holdings IBKR, throttleado) → price poller → trigger →
+fundamentals → reasoning → Telegram. El sync de holdings (§11.3) es best-effort:
+si el gateway no logueó (2FA pendiente), loguea y sigue sin tumbar el loop.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from .db.engine import get_engine
 from .logging import get_logger, setup_logging
 from .monitoring import HealthcheckPinger
 from .notifier import TelegramNotifier
-from .poller import PricePoller
+from .poller import HoldingsSyncService, PricePoller
 from .reasoning import AnthropicReasoner, ReasoningService, TemplateReasoner
 from .scheduler import AlertPipeline, Scheduler
 
@@ -45,8 +45,13 @@ def main() -> None:
         )
         reasoning = _build_reasoning(settings)
         pipeline = AlertPipeline.from_engine(engine, reasoning, notifier)
+        holdings_sync = HoldingsSyncService.from_engine(settings, engine)
         Scheduler(
-            settings=settings, poller=poller, pipeline=pipeline, pinger=pinger
+            settings=settings,
+            poller=poller,
+            pipeline=pipeline,
+            pinger=pinger,
+            holdings_sync=holdings_sync,
         ).run_forever()
 
 
