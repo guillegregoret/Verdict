@@ -3,7 +3,6 @@
 Read-only: solo lee precios de Finnhub y los persiste.
 """
 
-from .holdings import HoldingsSyncService
 from .service import PricePoller
 
-__all__ = ["HoldingsSyncService", "PricePoller"]
+__all__ = ["PricePoller"]

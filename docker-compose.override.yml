@@ -22,3 +22,8 @@ services:
     networks:
       - internal
       - egress
+
+  superset:
+    networks:
+      - internal
+      - egress

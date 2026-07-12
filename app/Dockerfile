@@ -1,5 +1,5 @@
 # ── App: monolito modular (non-root, read-only FS) ───────────────────────────
-FROM python:3.12-slim AS base
+FROM python:3.14.6-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -19,5 +19,4 @@ COPY src ./src
 RUN useradd --create-home --uid 10001 appuser
 USER appuser
 
-# Placeholder: reemplazar cuando exista el entrypoint real (§11 roadmap).
 CMD ["python", "-m", "portfolio_monitor.main"]

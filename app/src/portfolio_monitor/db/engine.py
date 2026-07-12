@@ -20,5 +20,4 @@ def get_engine() -> Engine:
     return create_engine(
         settings.sqlalchemy_url,
         pool_pre_ping=True,   # descarta conexiones muertas (gateway/restart diario)
-        future=True,
     )

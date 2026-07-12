@@ -11,68 +11,78 @@ activo y **avisa por Telegram** con una sugerencia contextualizada.
 
 **Loop completo end-to-end.** Los 9 módulos del roadmap (`CLAUDE.md` §11) están
 implementados y testeados: data layer (Finnhub → precios), gateway IBKR read-only
-(sync de holdings), trigger engine + Verdict Gate + cooldown, fundamentals (FMP),
-reasoning (Anthropic con fallback a template), notifier (Telegram), monitoreo
-(dead-man's switch + status.json) y dashboards (Grafana provisionado sobre Postgres).
+(sync de holdings cableado al scheduler), trigger engine + Verdict Gate + cooldown,
+fundamentals (FMP), reasoning (Anthropic con fallback a template), notifier
+(Telegram), monitoreo (Uptime Kuma auto-provisionado + dead-man's switch push) y
+dashboards (Grafana provisionado + Metabase/Superset auto-inicializados sobre las
+vistas de analítica). Pendientes: 2FA del gateway (login IBKR) y los blindajes
+de §8 (digests + Trivy).
 
-El `main.py` arranca el scheduler: cada tick pollea precios → detecta caídas →
-razona → notifica por Telegram. Suite verde (83 tests). Pendientes: cablear el
-sync de holdings de IBKR al loop (requiere gateway + 2FA) y los blindajes de §8
-(digests + Trivy).
+Stack pineado a últimas versiones: Postgres 17 + TimescaleDB 2.28, Python 3.14,
+Grafana 13, Uptime Kuma 2.4, Metabase 0.62, Superset 6.1.
 
 ## Estructura
 
 ```
 .
 ├── CLAUDE.md                 # Diseño / handoff (leer primero)
-├── docker-compose.yml        # app · postgres(+timescale) · ib-gateway · kuma · grafana
+├── docker-compose.yml        # app · postgres · ib-gateway · kuma(+init) · grafana
+│                             # · metabase(+init) · superset(+init) [perfil analytics]
 ├── .env.example              # Variables de entorno (copiar a .env)
 ├── db/
-│   └── migrations/           # SQL, se corren en orden por docker-entrypoint-initdb.d
+│   └── migrations/           # se corren en orden por docker-entrypoint-initdb.d
 │       ├── 0001_extensions.sql
 │       ├── 0002_schema.sql
 │       ├── 0003_hypertables.sql
-│       └── 0004_seed.sql
+│       ├── 0004_seed.sql
+│       ├── 0005_analytics_views.sql   # vistas para Grafana/Metabase/Superset
+│       └── 0006_analytics_init.sh     # rol read-only + DBs de metadata
 ├── app/                      # Monolito modular (Python, non-root)
-│   ├── Dockerfile
-│   ├── requirements.txt
 │   └── src/portfolio_monitor/
-│       ├── main.py           # entrypoint (stub)
+│       ├── main.py           # entrypoint: scheduler con el loop completo
 │       ├── config.py
 │       ├── db/               # acceso Postgres
 │       ├── data/             # finnhub · edgar_fmp · ibkr (read-only)
 │       ├── poller/           # price poller
+│       ├── holdings/         # sync de posiciones IBKR (best-effort)
 │       ├── trigger/          # trigger engine + verdict gate
 │       ├── reasoning/        # cliente Anthropic
 │       ├── notifier/         # bot Telegram
 │       ├── scheduler/        # orquestación de loops
-│       └── monitoring/       # dead-man's switch + status.json
-└── dashboards/grafana/       # provisioning (vacío)
+│       └── monitoring/       # dead-man's switch (push a Kuma) + status.json
+├── monitoring/kuma/          # kuma-init.js: admin + monitores automáticos
+└── dashboards/
+    ├── grafana/              # provisioning (datasource read-only + dashboard)
+    ├── metabase/             # metabase_init.py: conexión RO + dashboard
+    └── superset/             # superset_config.py + init + datasets/charts
 ```
 
 ## Arranque local
 
 ```bash
 cp .env.example .env && chmod 600 .env   # rellenar secretos
-docker compose up -d postgres            # aplica migraciones en volumen vacío
-docker compose up -d                     # levanta el resto
-# analítica opcional (Metabase):
-docker compose --profile analytics up -d
+# COMPOSE_PROFILES=analytics en .env = booleano que activa Metabase + Superset
+docker compose up -d --build
 ```
 
+Los one-shots (`kuma-init`, `metabase-init`, `superset-init`) corren en cada
+`up`, son idempotentes y dejan todo provisionado: monitores de Kuma apuntando a
+gateway/postgres/app/APIs externas, y dashboards "Verdict — Portfolio" en
+Metabase y Superset leyendo con el usuario **read-only** `verdict_ro`.
+
 UIs locales (bindeadas a `127.0.0.1`): Grafana `:3000`, Uptime Kuma `:3001`,
-Metabase `:3002`. Postgres y el IB Gateway **no** se exponen al host.
+Metabase `:3002`, Superset `:8088`. Postgres y el IB Gateway **no** se exponen
+al host.
 
 ## Tests
 
-Requiere Python 3.12+ (el código usa `datetime.UTC`).
+Sin entorno local: los tests corren dentro de un contenedor efímero con la
+imagen de la app (Python 3.14).
 
 ```bash
-cd app
-python3.12 -m venv .venv && source .venv/bin/activate
-pip install -r requirements-dev.txt
-pytest              # unit tests (sin infra)
-ruff check .        # lint
+docker compose build app
+docker run --rm -v "$PWD/app":/work -w /work portfolio-monitor-app \
+  sh -c "pip install -q -r requirements-dev.txt && python -m pytest -p no:cacheprovider && python -m ruff check ."
 ```
 
 Los tests de `tests/test_repositories.py` son de **integración**: se saltan solos

@@ -1,50 +1,87 @@
-"""HoldingsSyncService: posiciones de IBKR → tabla holdings (§11.3).
+"""Holdings Sync: posiciones IBKR (read-only) → Postgres (§11.3).
 
-Read-only. El gateway es async (`ib_async`), así que el sync es async; el
-scheduler (§2) lo orquestará. `from_engine()` cablea el repo concreto.
+🔴 READ-ONLY: se conecta al gateway con `readonly=True`, trae posiciones y las
+persiste. Nunca envía órdenes. El `upsert` preserva los campos de config del
+usuario (verdict/thesis/cluster/target_pct): solo actualiza shares/avg_cost.
+
+`ib_async` es async; acá aislamos ese detalle con `asyncio.run()` por sync, de
+modo que el scheduler (síncrono) lo llame como cualquier otro `run_once()`. La
+fuente de posiciones se inyecta vía factory para testear sin gateway ni loop.
 """
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Callable, Sequence
 from typing import Protocol
 
 from sqlalchemy import Engine
 
-from ..data.ibkr import Position
-from ..db.repositories import HoldingsRepository
+from ..config import Settings
+from ..data.ibkr import IBKRClient, IBKRError, Position
+from ..db.repositories import HoldingsRepository, PositionLike
 from ..logging import get_logger
 
 logger = get_logger(__name__)
 
 
+# ── Protocolos: desacoplan el sync del cliente/repo concretos (testabilidad) ──
 class PositionSource(Protocol):
-    async def fetch_positions(self) -> list[Position]: ...
+    async def connect(self) -> None: ...
+    async def fetch_positions(self) -> Sequence[Position]: ...
+    def disconnect(self) -> None: ...
 
 
 class HoldingsSink(Protocol):
-    def upsert_positions(self, positions: list[Position]) -> int: ...
+    def upsert_positions(self, positions: Sequence[PositionLike]) -> int: ...
 
 
 class HoldingsSyncService:
-    """Trae posiciones de una fuente read-only y las upserta en holdings."""
+    """Trae posiciones del gateway y las sincroniza a Postgres.
 
-    def __init__(self, source: PositionSource, holdings: HoldingsSink) -> None:
-        self._source = source
+    Best-effort: si el gateway no está disponible (login/2FA pendiente, caído),
+    loguea y devuelve 0 sin propagar — el sync nunca debe tumbar el loop.
+    """
+
+    def __init__(
+        self,
+        settings: Settings,
+        source_factory: Callable[[], PositionSource],
+        holdings: HoldingsSink,
+    ) -> None:
+        self._settings = settings
+        self._source_factory = source_factory
         self._holdings = holdings
 
     @classmethod
-    def from_engine(cls, source: PositionSource, engine: Engine) -> HoldingsSyncService:
-        """Construye el service cableando el repo concreto sobre `engine`."""
-        return cls(source=source, holdings=HoldingsRepository(engine))
+    def from_engine(cls, settings: Settings, engine: Engine) -> HoldingsSyncService:
+        """Cablea un `IBKRClient` nuevo por sync + el `HoldingsRepository`."""
+        return cls(
+            settings=settings,
+            source_factory=lambda: IBKRClient(settings),
+            holdings=HoldingsRepository(engine),
+        )
 
-    async def sync_once(self) -> int:
-        """Un sync completo. Devuelve cuántas posiciones se aplicaron."""
-        positions = await self._source.fetch_positions()
-        if not positions:
-            logger.info("Sync de holdings: IBKR no devolvió posiciones.")
+    def run_once(self) -> int:
+        """Un ciclo de sync. Devuelve cuántas posiciones se aplicaron."""
+        try:
+            positions = asyncio.run(self._collect())
+        except IBKRError as exc:
+            logger.warning("Holdings sync: gateway no disponible: %s", exc)
             return 0
         applied = self._holdings.upsert_positions(positions)
         logger.info(
-            "Sync de holdings: %d/%d posiciones aplicadas.", applied, len(positions)
+            "Holdings sync: %d posiciones traídas, %d aplicadas.",
+            len(positions),
+            applied,
         )
         return applied
+
+    async def _collect(self) -> Sequence[Position]:
+        """Conecta (read-only), trae posiciones y desconecta siempre."""
+        source = self._source_factory()
+        try:
+            await source.connect()
+            return await source.fetch_positions()
+        finally:
+            source.disconnect()

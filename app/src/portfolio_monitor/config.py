@@ -63,8 +63,10 @@ class Settings(BaseSettings):
     # ── IB Gateway (🔴 READ-ONLY) ────────────────────────────────────────────
     # El cliente se conecta con readonly=True; el gateway además corre con
     # READ_ONLY_API=yes. Doble red de seguridad: nunca puede operar.
+    # La imagen gnzsnz/ib-gateway bindea 4001/4002 a localhost DEL contenedor y
+    # publica vía socat 4003 (live) / 4004 (paper) hacia otros contenedores.
     ib_gateway_host: str = "ib-gateway"
-    ib_gateway_port: int = 4002        # 4002 = paper, 4001 = live (ambos read-only)
+    ib_gateway_port: int = 4004        # 4004 = paper, 4003 = live (ambos read-only)
     ib_gateway_client_id: int = 1
     # Cadencia del sync de holdings: 1 cada N ticks (las posiciones cambian lento;
     # no reconectar al gateway en cada barrido). 0 = deshabilitado.

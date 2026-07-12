@@ -6,28 +6,34 @@
 #
 # Redes:
 #   - internal (internal: true): data plane sin salida a internet.
-#       postgres ↔ ib-gateway ↔ app ↔ grafana ↔ metabase ↔ uptime-kuma
-#   - egress (bridge): salida a internet. Solo la usan `app` y `uptime-kuma`.
-#       (La restricción fina a Finnhub/Anthropic/Telegram/EDGAR se hace en el
-#        firewall del host — ver CLAUDE.md §8.)
-# Los puertos publicados (grafana/kuma/metabase) se bindean a 127.0.0.1 y
-# funcionan aunque su red sea `internal: true` (port-mapping no requiere egress).
-# Ningún puerto sensible (postgres 5432, gateway 4001/4002) se publica al host.
+#       postgres ↔ ib-gateway ↔ app ↔ grafana ↔ metabase ↔ superset ↔ uptime-kuma
+#   - egress (bridge): salida a internet. La usan `app` (Finnhub/Anthropic/
+#       Telegram/EDGAR), `ib-gateway` (auth IBKR) y `uptime-kuma` (monitorea APIs).
+#       (La restricción fina por destino se hace en el firewall del host — §8.)
+# Los puertos publicados se bindean a 127.0.0.1. Ningún puerto sensible
+# (postgres 5432, gateway 4001-4004) se publica al host.
+#
+# Analítica (Metabase + Superset): activable con el "booleano" COMPOSE_PROFILES
+# en .env → `COMPOSE_PROFILES=analytics` (vacío = apagado).
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: portfolio-monitor
 
 services:
-  # ── Base de datos: fuente de verdad (Postgres + TimescaleDB) ────────────────
+  # ── Base de datos: fuente de verdad (Postgres 17 + TimescaleDB) ─────────────
   postgres:
-    image: timescale/timescaledb:2.17.2-pg16
+    image: timescale/timescaledb:2.28.2-pg17
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_RO_USER: ${POSTGRES_RO_USER:-verdict_ro}
+      POSTGRES_RO_PASSWORD: ${POSTGRES_RO_PASSWORD}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # pgdata17: volumen PG17. El viejo `pgdata` (PG16) queda como backup;
+      # borrarlo a mano cuando se verifique la migración (docker volume rm).
+      - pgdata17:/var/lib/postgresql/data
       # Migraciones: se ejecutan en orden alfabético SOLO en un volumen vacío.
       - ./db/migrations:/docker-entrypoint-initdb.d:ro
     networks:
@@ -51,10 +57,11 @@ services:
       READ_ONLY_API: ${READ_ONLY_API:-yes}       # 🔴 red de seguridad crítica
       AUTO_RESTART_TIME: ${IB_GATEWAY_AUTO_RESTART_TIME:-11:59 PM}
       TZ: ${TZ:-Europe/Rome}
-    # Puertos 4001/4002 solo alcanzables dentro de la red `internal`.
-    # NUNCA publicar 4001/4002 al host público.
+    # El gateway bindea 4001/4002 a localhost DEL contenedor; socat publica
+    # 4003 (live) / 4004 (paper) hacia la red `internal`. La app usa 4004.
+    # NUNCA publicar estos puertos al host público.
     networks:
-      - internal                     # → app le habla la API por acá
+      - internal                     # → app le habla la API por acá (4004)
       - egress                       # → IBKR auth + market data (gdc*.ibllc.com)
     security_opt:
       - no-new-privileges:true
@@ -72,7 +79,7 @@ services:
       ib-gateway:
         condition: service_started
     networks:
-      - internal                     # → postgres, ib-gateway
+      - internal                     # → postgres, ib-gateway, uptime-kuma (push)
       - egress                       # → Finnhub, Anthropic, Telegram, EDGAR/FMP
     security_opt:
       - no-new-privileges:true
@@ -84,7 +91,7 @@ services:
 
   # ── Uptime Kuma: monitoreo HTTP/TCP de APIs, gateway y app ──────────────────
   uptime-kuma:
-    image: louislam/uptime-kuma:1.23.16
+    image: louislam/uptime-kuma:2.4.0
     restart: unless-stopped
     volumes:
       - kuma_data:/app/data
@@ -92,22 +99,47 @@ services:
       - "127.0.0.1:3001:3001"        # UI local; no exponer públicamente
     networks:
       - internal                     # → monitorea gateway/app/postgres
-      - egress                       # → monitorea Finnhub/Anthropic/EODHD
+      - egress                       # → monitorea Finnhub/Anthropic/Telegram
+    security_opt:
+      - no-new-privileges:true
+
+  # One-shot: crea el admin (si hace falta), la notificación de Telegram y los
+  # monitores (idempotente — corre en cada `up` y solo agrega lo que falte).
+  kuma-init:
+    image: louislam/uptime-kuma:2.4.0
+    restart: "no"
+    entrypoint: ["node", "/init/kuma-init.js"]
+    environment:
+      NODE_PATH: /app/node_modules   # socket.io-client viene con la imagen
+      KUMA_URL: http://uptime-kuma:3001
+      KUMA_ADMIN_USER: ${KUMA_ADMIN_USER:-admin}
+      KUMA_ADMIN_PASSWORD: ${KUMA_ADMIN_PASSWORD}
+      KUMA_PUSH_TOKEN: ${KUMA_PUSH_TOKEN}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      COMPOSE_PROFILES: ${COMPOSE_PROFILES:-}
+    volumes:
+      - ./monitoring/kuma:/init:ro
+    depends_on:
+      uptime-kuma:
+        condition: service_started
+    networks:
+      - internal
     security_opt:
       - no-new-privileges:true
 
   # ── Grafana: dashboards infra + series de portfolio ─────────────────────────
   grafana:
-    image: grafana/grafana:11.3.1
+    image: grafana/grafana:13.1.0
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
       GF_USERS_ALLOW_SIGN_UP: "false"
-      # Consumidos por el datasource provisionado (interpolación ${VAR}).
+      # Consumidos por el datasource provisionado (usuario de SOLO lectura).
       POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_RO_USER: ${POSTGRES_RO_USER:-verdict_ro}
+      POSTGRES_RO_PASSWORD: ${POSTGRES_RO_PASSWORD}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./dashboards/grafana/provisioning:/etc/grafana/provisioning:ro
@@ -121,15 +153,15 @@ services:
     security_opt:
       - no-new-privileges:true
 
-  # ── Metabase (opcional): analítica exploratoria / Sankey ────────────────────
-  # Levantar con:  docker compose --profile analytics up -d
+  # ── Metabase (perfil analytics): analítica exploratoria ─────────────────────
   metabase:
-    image: metabase/metabase:v0.51.8
+    image: metabase/metabase:v0.62.4
     restart: unless-stopped
     profiles: ["analytics"]
     environment:
+      # Metadata propia en la base `metabase` (NO en la del portfolio).
       MB_DB_TYPE: postgres
-      MB_DB_DBNAME: ${POSTGRES_DB}
+      MB_DB_DBNAME: metabase
       MB_DB_PORT: 5432
       MB_DB_USER: ${POSTGRES_USER}
       MB_DB_PASS: ${POSTGRES_PASSWORD}
@@ -144,14 +176,94 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  # One-shot: setup del admin + conexión (read-only) a la DB del proyecto +
+  # dashboard "Verdict" con las vistas de 0005. Idempotente.
+  metabase-init:
+    image: python:3.14.6-slim
+    restart: "no"
+    profiles: ["analytics"]
+    command: ["python", "/init/metabase_init.py"]
+    environment:
+      METABASE_URL: http://metabase:3000
+      METABASE_ADMIN_EMAIL: ${METABASE_ADMIN_EMAIL}
+      METABASE_ADMIN_PASSWORD: ${METABASE_ADMIN_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_RO_USER: ${POSTGRES_RO_USER:-verdict_ro}
+      POSTGRES_RO_PASSWORD: ${POSTGRES_RO_PASSWORD}
+    volumes:
+      - ./dashboards/metabase:/init:ro
+    depends_on:
+      metabase:
+        condition: service_started
+    networks:
+      - internal
+    security_opt:
+      - no-new-privileges:true
+
+  # ── Superset (perfil analytics): analítica avanzada / Sankey ────────────────
+  superset:
+    build:
+      context: ./dashboards/superset
+      dockerfile: Dockerfile      # apache/superset:6.1.0 + driver de Postgres
+    restart: unless-stopped
+    profiles: ["analytics"]
+    environment:
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY}
+      # Metadata propia en la base `superset_meta` (NO en la del portfolio).
+      SUPERSET_META_URI: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/superset_meta
+    volumes:
+      - superset_home:/app/superset_home
+      - ./dashboards/superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+    ports:
+      - "127.0.0.1:8088:8088"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal                     # → lee de postgres (no necesita egress)
+    security_opt:
+      - no-new-privileges:true
+
+  # One-shot: migra la metadata, crea el admin y provisiona la conexión
+  # (read-only), los datasets, charts y el dashboard "Verdict". Idempotente.
+  superset-init:
+    build:
+      context: ./dashboards/superset
+      dockerfile: Dockerfile
+    restart: "no"
+    profiles: ["analytics"]
+    entrypoint: ["bash", "/init/superset_init.sh"]
+    environment:
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY}
+      SUPERSET_META_URI: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/superset_meta
+      SUPERSET_URL: http://superset:8088
+      SUPERSET_ADMIN_USER: ${SUPERSET_ADMIN_USER:-admin}
+      SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_RO_USER: ${POSTGRES_RO_USER:-verdict_ro}
+      POSTGRES_RO_PASSWORD: ${POSTGRES_RO_PASSWORD}
+    volumes:
+      - ./dashboards/superset:/init:ro
+      - ./dashboards/superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+    depends_on:
+      superset:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+    security_opt:
+      - no-new-privileges:true
+
 networks:
   internal:
     driver: bridge
     internal: true                   # data plane: sin salida a internet
   egress:
-    driver: bridge                   # salida a internet (solo app + uptime-kuma)
+    driver: bridge                   # salida a internet (app, ib-gateway, kuma)
 
 volumes:
-  pgdata:
+  pgdata17:
   kuma_data:
   grafana_data:
+  superset_home:

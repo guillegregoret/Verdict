@@ -5,7 +5,9 @@ módulos de reasoning (§6) y notifier (§7) los consumen y recién ahí se pers
 alerta. No llama a Anthropic ni Telegram.
 
 Pendiente para fases siguientes: chequeo de fundamentals (§5.3), bucket awareness
-(§5.4) y alertas informativas para veredictos no-compra (§5.2).
+(§5.4), alertas informativas para veredictos no-compra (§5.2) y el reset del
+cooldown cuando el precio recupera sobre el umbral (§5.5 — hoy es 1/día a secas,
+conservador contra fatiga de alertas).
 """
 
 from __future__ import annotations

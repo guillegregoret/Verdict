@@ -42,6 +42,21 @@ def test_ping_failure_hits_fail_endpoint() -> None:
     assert seen["url"] == "https://hc.io/abc/fail"
 
 
+def test_ping_failure_kuma_push_uses_status_down() -> None:
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        return httpx.Response(200, text="OK")
+
+    settings = Settings(
+        _env_file=None,
+        healthchecks_ping_url="http://uptime-kuma:3001/api/push/tok123",
+    )
+    HealthcheckPinger(settings, client=_client(handler)).ping(success=False)
+    assert seen["url"] == "http://uptime-kuma:3001/api/push/tok123?status=down"
+
+
 def test_ping_is_noop_without_url() -> None:
     called = {"n": 0}
 

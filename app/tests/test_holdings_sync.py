@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from portfolio_monitor.config import Settings
 from portfolio_monitor.data.ibkr import IBKRError, Position
-from portfolio_monitor.poller import HoldingsSyncService
+from portfolio_monitor.holdings import HoldingsSyncService
 from portfolio_monitor.scheduler import Scheduler
 
 

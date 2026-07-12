@@ -1,21 +1,17 @@
-# ── Dependencias de la app (scaffold — pinear versiones al implementar) ──────
+# ── Dependencias de la app (pineadas — actualizadas 2026-07) ─────────────────
 # Broker (read-only). NO usar ib_insync (deprecado).
-ib_async
+ib_async==2.1.0
 
 # HTTP para clientes de datos (Finnhub, EDGAR/FMP, Telegram)
-httpx
+httpx==0.28.1
 
 # Postgres / TimescaleDB
-psycopg[binary]
-SQLAlchemy
+psycopg[binary]==3.3.4
+SQLAlchemy==2.0.51
 
 # Razonamiento
-anthropic
+anthropic==0.116.0
 
-# Config / entorno
-pydantic
-pydantic-settings
-python-dotenv
-
-# Scheduler
-APScheduler
+# Config / entorno (pydantic-settings ya trae python-dotenv para leer .env)
+pydantic==2.13.4
+pydantic-settings==2.14.2

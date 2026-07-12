@@ -10,10 +10,11 @@ from __future__ import annotations
 from .config import Settings, get_settings
 from .data.finnhub import FinnhubClient
 from .db.engine import get_engine
+from .holdings import HoldingsSyncService
 from .logging import get_logger, setup_logging
 from .monitoring import HealthcheckPinger
 from .notifier import TelegramNotifier
-from .poller import HoldingsSyncService, PricePoller
+from .poller import PricePoller
 from .reasoning import AnthropicReasoner, ReasoningService, TemplateReasoner
 from .scheduler import AlertPipeline, Scheduler
 

@@ -1,5 +1,5 @@
-# Dependencias de desarrollo/test (scaffold — pinear al implementar).
+# Dependencias de desarrollo/test (pineadas — actualizadas 2026-07).
 -r requirements.txt
 
-pytest
-ruff
+pytest==9.1.1
+ruff==0.15.21
