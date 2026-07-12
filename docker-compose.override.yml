@@ -1,0 +1,24 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Override SOLO para desarrollo local en Docker Desktop (macOS/Windows).
+#
+# Compose carga este archivo automáticamente además de docker-compose.yml.
+# NO se despliega al VPS (Linux): allá el compose base funciona tal cual, porque
+# docker-proxy + iptables sí publican puertos de contenedores en redes
+# `internal: true`. En Docker Desktop, en cambio, el reenvío de puertos corre en
+# una VM y NO llega a un contenedor que solo vive en una red `internal: true`:
+# el binding 127.0.0.1:3000 queda declarado pero muerto.
+#
+# Fix: sumar grafana/metabase a la red `egress` (host-routable) para poder abrir
+# la UI desde el navegador del host. kuma ya está en ambas redes, por eso funciona.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  grafana:
+    networks:
+      - internal   # → lee de postgres
+      - egress     # → host-routable en Docker Desktop (solo dev local)
+
+  metabase:
+    networks:
+      - internal
+      - egress

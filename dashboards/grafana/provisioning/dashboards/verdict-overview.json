@@ -4,9 +4,9 @@
   "tags": ["verdict"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "1m",
-  "time": { "from": "now-24h", "to": "now" },
+  "time": { "from": "now-7d", "to": "now" },
   "templating": {
     "list": [
       {
@@ -23,61 +23,351 @@
   },
   "panels": [
     {
+      "id": 100,
+      "type": "row",
+      "title": "📊 Estado general",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
       "id": 1,
-      "title": "Último precio por ticker",
-      "type": "table",
+      "title": "Tickers habilitados",
+      "type": "stat",
       "datasource": { "type": "postgres", "uid": "verdict-postgres" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "fixed", "fixedColor": "blue" }, "unit": "short" },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
+          "datasource": { "type": "postgres", "uid": "verdict-postgres" },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT DISTINCT ON (ticker) ticker, price, ts FROM prices ORDER BY ticker, ts DESC"
+          "editorMode": "code",
+          "rawSql": "SELECT count(*) FROM ticker_config WHERE enabled"
         }
       ]
     },
     {
       "id": 2,
-      "title": "Precio de $ticker",
-      "type": "timeseries",
+      "title": "Alertas hoy",
+      "type": "stat",
       "datasource": { "type": "postgres", "uid": "verdict-postgres" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
-          "format": "time_series",
+          "datasource": { "type": "postgres", "uid": "verdict-postgres" },
+          "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ts AS \"time\", price FROM prices WHERE ticker = '$ticker' ORDER BY ts"
+          "editorMode": "code",
+          "rawSql": "SELECT count(*) FROM alerts WHERE ts >= date_trunc('day', now())"
         }
       ]
     },
     {
       "id": 3,
-      "title": "Alertas recientes",
-      "type": "table",
+      "title": "Fuentes de datos OK",
+      "type": "stat",
       "datasource": { "type": "postgres", "uid": "verdict-postgres" },
-      "gridPos": { "h": 9, "w": 14, "x": 0, "y": 8 },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "fixed", "fixedColor": "green" }, "unit": "short" },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
+          "datasource": { "type": "postgres", "uid": "verdict-postgres" },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ts, ticker, pct_change, verdict, suggestion FROM alerts ORDER BY ts DESC LIMIT 50"
+          "editorMode": "code",
+          "rawSql": "SELECT count(*) FILTER (WHERE status = 'up') FROM (SELECT DISTINCT ON (source) source, status FROM data_source_health ORDER BY source, ts DESC) s"
         }
       ]
     },
     {
       "id": 4,
-      "title": "Salud de fuentes de datos",
-      "type": "table",
+      "title": "Última actualización de precios",
+      "type": "stat",
       "datasource": { "type": "postgres", "uid": "verdict-postgres" },
-      "gridPos": { "h": 9, "w": 10, "x": 14, "y": 8 },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": { "unit": "dateTimeFromNow", "color": { "mode": "fixed", "fixedColor": "text" } },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
+          "datasource": { "type": "postgres", "uid": "verdict-postgres" },
           "format": "table",
           "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT max(ts) AS ultimo FROM prices"
+        }
+      ]
+    },
+    {
+      "id": 101,
+      "type": "row",
+      "title": "📉 Señal de caídas (Verdict Gate)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 }
+    },
+    {
+      "id": 5,
+      "title": "Caída actual vs ventana (¿dispararía?)",
+      "description": "Replica el Trigger Engine: precio de referencia (primer precio dentro de la ventana del ticker) vs último precio. Rojo = por debajo del umbral configurado.",
+      "type": "table",
+      "datasource": { "type": "postgres", "uid": "verdict-postgres" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 6 },
+      "options": { "showHeader": true, "footer": { "show": false } },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto", "filterable": true } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "pct_change" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "red", "value": null },
+                    { "color": "orange", "value": -4.5 },
+                    { "color": "text", "value": -1 },
+                    { "color": "green", "value": 0 }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "umbral_pct" },
+            "properties": [{ "id": "unit", "value": "percent" }]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "verdict-postgres" },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT tc.ticker, h.verdict, tc.threshold_pct AS umbral_pct, tc.window_minutes AS ventana_min, ref.price AS referencia, cur.price AS actual, round((cur.price - ref.price) / NULLIF(ref.price, 0) * 100, 2) AS pct_change FROM ticker_config tc LEFT JOIN LATERAL (SELECT price FROM prices p WHERE p.ticker = tc.ticker AND p.ts >= now() - (tc.window_minutes || ' minutes')::interval ORDER BY p.ts ASC LIMIT 1) ref ON true LEFT JOIN LATERAL (SELECT price FROM prices p WHERE p.ticker = tc.ticker ORDER BY p.ts DESC LIMIT 1) cur ON true LEFT JOIN holdings h ON h.ticker = tc.ticker WHERE tc.enabled ORDER BY pct_change ASC NULLS LAST"
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "type": "row",
+      "title": "💹 Precios",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 }
+    },
+    {
+      "id": 6,
+      "title": "Precio de $ticker",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "verdict-postgres" },
+      "gridPos": { "h": 9, "w": 14, "x": 0, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "auto", "spanNulls": true }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "verdict-postgres" },
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT ts AS \"time\", price FROM prices WHERE ticker = '$ticker' ORDER BY ts"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Último precio por ticker",
+      "type": "table",
+      "datasource": { "type": "postgres", "uid": "verdict-postgres" },
+      "gridPos": { "h": 9, "w": 10, "x": 14, "y": 16 },
+      "options": { "showHeader": true },
+      "fieldConfig": {
+        "defaults": { "custom": { "filterable": true } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "price" }, "properties": [{ "id": "unit", "value": "currencyUSD" }] }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "verdict-postgres" },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT DISTINCT ON (ticker) ticker, price, ts FROM prices ORDER BY ticker, ts DESC"
+        }
+      ]
+    },
+    {
+      "id": 103,
+      "type": "row",
+      "title": "🗂️ Portfolio & veredictos",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 25 }
+    },
+    {
+      "id": 8,
+      "title": "Holdings monitoreados",
+      "type": "table",
+      "datasource": { "type": "postgres", "uid": "verdict-postgres" },
+      "gridPos": { "h": 10, "w": 16, "x": 0, "y": 26 },
+      "options": { "showHeader": true, "footer": { "show": false } },
+      "fieldConfig": {
+        "defaults": { "custom": { "filterable": true } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "avg_cost" }, "properties": [{ "id": "unit", "value": "currencyUSD" }] }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "verdict-postgres" },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT a.name AS cuenta, h.ticker, h.company, h.cluster, h.verdict, h.shares, h.avg_cost FROM holdings h JOIN accounts a ON a.id = h.account_id ORDER BY a.name, h.verdict, h.ticker"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Distribución de veredictos",
+      "type": "piechart",
+      "datasource": { "type": "postgres", "uid": "verdict-postgres" },
+      "gridPos": { "h": 10, "w": 8, "x": 16, "y": 26 },
+      "options": {
+        "reduceOptions": { "calcs": [], "fields": "/^n$/", "values": true },
+        "pieType": "donut",
+        "legend": { "displayMode": "table", "placement": "right", "values": ["value"] }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "verdict-postgres" },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT verdict, count(*) AS n FROM holdings GROUP BY verdict ORDER BY n DESC"
+        }
+      ]
+    },
+    {
+      "id": 104,
+      "type": "row",
+      "title": "🔔 Alertas & salud de fuentes",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 36 }
+    },
+    {
+      "id": 10,
+      "title": "Alertas recientes",
+      "type": "table",
+      "datasource": { "type": "postgres", "uid": "verdict-postgres" },
+      "gridPos": { "h": 9, "w": 14, "x": 0, "y": 37 },
+      "options": { "showHeader": true },
+      "fieldConfig": {
+        "defaults": { "custom": { "filterable": true } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "pct_change" }, "properties": [{ "id": "unit", "value": "percent" }] }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "verdict-postgres" },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT ts, ticker, pct_change, verdict, status, suggestion FROM alerts ORDER BY ts DESC LIMIT 50"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Salud de fuentes de datos",
+      "type": "table",
+      "datasource": { "type": "postgres", "uid": "verdict-postgres" },
+      "gridPos": { "h": 9, "w": 10, "x": 14, "y": 37 },
+      "options": { "showHeader": true },
+      "fieldConfig": {
+        "defaults": { "custom": { "filterable": true } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "status" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "up": { "color": "green", "index": 0 }, "degraded": { "color": "orange", "index": 1 }, "down": { "color": "red", "index": 2 } } }
+                ]
+              },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ]
+          },
+          { "matcher": { "id": "byName", "options": "latency_ms" }, "properties": [{ "id": "unit", "value": "ms" }] }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "verdict-postgres" },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
           "rawSql": "SELECT DISTINCT ON (source) source, status, latency_ms, ts FROM data_source_health ORDER BY source, ts DESC"
         }
       ]
