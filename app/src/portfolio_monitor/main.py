@@ -7,9 +7,14 @@ si el gateway no logueó (2FA pendiente), loguea y sigue sin tumbar el loop.
 
 from __future__ import annotations
 
+from contextlib import ExitStack
+
+from sqlalchemy import Engine
+
 from .config import Settings, get_settings
-from .data.finnhub import FinnhubClient
+from .data.finnhub import FinnhubClient, FinnhubFundamentalsProvider
 from .db.engine import get_engine
+from .fundamentals import FundamentalsService
 from .holdings import HoldingsSyncService
 from .logging import get_logger, setup_logging
 from .monitoring import HealthcheckPinger
@@ -17,6 +22,7 @@ from .notifier import TelegramNotifier
 from .poller import PricePoller
 from .reasoning import AnthropicReasoner, ReasoningService, TemplateReasoner
 from .scheduler import AlertPipeline, Scheduler
+from .scheduler.pipeline import FundamentalsReader
 
 logger = get_logger(__name__)
 
@@ -30,22 +36,40 @@ def _build_reasoning(settings: Settings) -> ReasoningService:
     return ReasoningService(primary=fallback)
 
 
+def _build_fundamentals(
+    settings: Settings, engine: Engine, stack: ExitStack
+) -> FundamentalsReader:
+    """FundamentalsService con Finnhub (/stock/metric) para el chequeo de tesis (§5.3).
+
+    Al gatillar un ticker trae P/E, crecimiento, margen y deuda y persiste el
+    snapshot; si el fetch falla, la alerta igual sale (best-effort en el pipeline).
+    Reutiliza la key de Finnhub que ya exige el price poller.
+    """
+    provider = stack.enter_context(FinnhubFundamentalsProvider(settings))
+    return FundamentalsService.from_engine(
+        provider, engine, max_age_hours=settings.fundamentals_max_age_hours
+    )
+
+
 def main() -> None:
     settings = get_settings()
     setup_logging(settings.log_level)
     logger.info("Portfolio Monitor arrancando (env=%s).", settings.env)
 
     engine = get_engine()
-    with (
-        FinnhubClient(settings) as finnhub,
-        TelegramNotifier(settings) as notifier,
-        HealthcheckPinger(settings) as pinger,
-    ):
+    with ExitStack() as stack:
+        finnhub = stack.enter_context(FinnhubClient(settings))
+        notifier = stack.enter_context(TelegramNotifier(settings))
+        pinger = stack.enter_context(HealthcheckPinger(settings))
+
         poller = PricePoller.from_engine(
             settings=settings, engine=engine, quotes=finnhub
         )
         reasoning = _build_reasoning(settings)
-        pipeline = AlertPipeline.from_engine(engine, reasoning, notifier)
+        fundamentals = _build_fundamentals(settings, engine, stack)
+        pipeline = AlertPipeline.from_engine(
+            engine, reasoning, notifier, fundamentals=fundamentals
+        )
         holdings_sync = HoldingsSyncService.from_engine(settings, engine)
         Scheduler(
             settings=settings,

@@ -73,12 +73,21 @@ class AlertPipeline:
 
     @classmethod
     def from_engine(
-        cls, engine: Engine, reasoning: ReasoningService, notifier: MessageSender
+        cls,
+        engine: Engine,
+        reasoning: ReasoningService,
+        notifier: MessageSender,
+        fundamentals: FundamentalsReader | None = None,
     ) -> AlertPipeline:
-        """Cablea los repos y el trigger engine sobre `engine`."""
+        """Cablea los repos y el trigger engine sobre `engine`.
+
+        `fundamentals`: reader de fundamentals. Si es None se usa el repo
+        read-only (lee lo que haya en la tabla, no refetchea). `main.py` inyecta
+        el `FundamentalsService` (con provider FMP) para que traiga on-trigger.
+        """
         return cls(
             trigger=TriggerEngine.from_engine(engine),
-            fundamentals=FundamentalsRepository(engine),
+            fundamentals=fundamentals or FundamentalsRepository(engine),
             reasoning=reasoning,
             notifier=notifier,
             alerts=AlertRepository(engine),
@@ -89,7 +98,15 @@ class AlertPipeline:
         events = self._trigger.evaluate()
         sent = 0
         for event in events:
-            fundamentals = self._fundamentals.latest(event.ticker)
+            try:
+                fundamentals = self._fundamentals.latest(event.ticker)
+            except Exception as exc:  # noqa: BLE001 - best-effort: no frenar la alerta
+                logger.warning(
+                    "Fundamentals %s no disponibles (%s); sigo sin ellos.",
+                    event.ticker,
+                    exc,
+                )
+                fundamentals = None
             context = ReasoningContext.from_trigger_event(
                 event, fundamentals=fundamentals
             )

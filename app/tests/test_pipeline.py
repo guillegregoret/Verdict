@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from portfolio_monitor.config import Settings
 from portfolio_monitor.db.repositories import FundamentalsRow
 from portfolio_monitor.notifier import NotifierError
@@ -30,15 +32,23 @@ class FakeTrigger:
 
 
 class FakeFundamentals:
+    def __init__(self, row: FundamentalsRow | None = None, raises: bool = False) -> None:
+        self._row = row
+        self._raises = raises
+
     def latest(self, ticker: str) -> FundamentalsRow | None:
-        return None
+        if self._raises:
+            raise RuntimeError("fundamentals boom")
+        return self._row
 
 
 class FakeReasoning:
     def __init__(self, error: bool = False) -> None:
         self._error = error
+        self.contexts: list[ReasoningContext] = []
 
     def suggest(self, context: ReasoningContext) -> Suggestion:
+        self.contexts.append(context)
         if self._error:
             raise ReasoningError("boom")
         return Suggestion(text=f"sugerencia {context.ticker}", source="template")
@@ -109,6 +119,40 @@ def test_notifier_error_does_not_record_alert() -> None:
     pipeline, notifier, alerts = _pipeline([_event()], notifier_error=True)
     assert pipeline.run_once() == 0
     assert alerts.records == []
+
+
+def test_fundamentals_reach_reasoning() -> None:
+    # los fundamentals leídos deben llegar al contexto que ve el reasoner (§5.3)
+    row = FundamentalsRow(
+        ticker="NVDA", ts=datetime(2026, 7, 13, tzinfo=UTC), pe=20.0,
+        revenue_growth=0.1, gross_margin=0.5, debt_to_equity=0.3,
+    )
+    reasoning = FakeReasoning()
+    pipeline = AlertPipeline(
+        trigger=FakeTrigger([_event("NVDA")]),
+        fundamentals=FakeFundamentals(row=row),
+        reasoning=reasoning,
+        notifier=FakeNotifier(),
+        alerts=FakeAlerts(),
+    )
+    assert pipeline.run_once() == 1
+    assert reasoning.contexts[0].fundamentals is row
+
+
+def test_fundamentals_error_does_not_break_alert() -> None:
+    # best-effort: si el reader de fundamentals explota, la alerta igual sale
+    reasoning = FakeReasoning()
+    notifier = FakeNotifier()
+    pipeline = AlertPipeline(
+        trigger=FakeTrigger([_event("NVDA")]),
+        fundamentals=FakeFundamentals(raises=True),
+        reasoning=reasoning,
+        notifier=notifier,
+        alerts=FakeAlerts(),
+    )
+    assert pipeline.run_once() == 1
+    assert notifier.sent == ["sugerencia NVDA"]
+    assert reasoning.contexts[0].fundamentals is None
 
 
 # ── Scheduler ────────────────────────────────────────────────────────────────

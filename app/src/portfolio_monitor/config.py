@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     # (§13: EDGAR vs FMP vs Finnhub); arrancamos con FMP por su REST de ratios.
     fmp_api_key: str = ""
     fmp_base_url: str = "https://financialmodelingprep.com/api/v3"
+    # Frescura del snapshot: al gatillar un ticker, si el último fundamentals es
+    # más viejo que esto se refetchea de FMP (los fundamentals cambian lento —
+    # trimestral—, así que 24h evita pegarle a FMP en cada alerta).
+    fundamentals_max_age_hours: int = 24
 
     # ── Anthropic (razonamiento) ─────────────────────────────────────────────
     anthropic_api_key: str = ""

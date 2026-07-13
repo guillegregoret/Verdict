@@ -319,7 +319,9 @@ CREATE TABLE data_source_health (
 
 ## 13. Decisiones abiertas / TODO
 
-- [ ] Elegir provider de fundamentals definitivo (EDGAR vs FMP vs Finnhub) según cobertura real.
+- [x] Provider de fundamentals: **Finnhub** (`/stock/metric?metric=all`), reusa la key
+      del poller y cubre el free tier. FMP/EDGAR quedan como alternativas detrás del
+      mismo `FundamentalsProvider`. Se traen on-trigger (§5.3) con freshness configurable.
 - [ ] Definir manejo fino del 2FA headless del Gateway (token auto-restart).
 - [ ] ¿Mantener Airtable como front-end mobile de edición + sync a Postgres, o migrar 100%?
 - [ ] Cobertura europea (defensa) — activar EODHD "EOD+Intraday Extended" (~$25/mes) en fase 2.

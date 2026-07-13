@@ -1,17 +1,26 @@
-"""Cliente Finnhub: quotes (backbone de precios, CLAUDE.md §3).
+"""Cliente Finnhub: quotes (backbone de precios) + fundamentals (§3, §5.3).
 
-Solo lo necesario para el price poller. Fundamentals y news se sumarán en sus
-módulos (§11.5). Free tier ~60 req/min: el spacing lo maneja el poller.
+`FinnhubClient` cubre las quotes del price poller. `FinnhubFundamentalsProvider`
+implementa el protocolo de fundamentals (§5.3) sobre `/stock/metric`, reutilizando
+la key que ya usamos para precios. Free tier ~60 req/min: el spacing lo maneja el
+poller; los fundamentals se traen solo on-trigger (pocos), así que no molesta.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 
 from ..config import Settings
+from ..logging import get_logger
+
+# Tipos compartidos de fundamentals (la abstracción vive en edgar_fmp por historia).
+from .edgar_fmp import Fundamentals, FundamentalsError
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -70,6 +79,79 @@ class FinnhubClient:
         self._client.close()
 
     def __enter__(self) -> FinnhubClient:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+
+def _num(value: Any) -> float | None:
+    """Coerciona a float; None si es None o no numérico."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _pct_to_fraction(value: Any) -> float | None:
+    """Finnhub da márgenes/crecimiento en % (74.15); los normaliza a fracción (0.7415)."""
+    n = _num(value)
+    return n / 100.0 if n is not None else None
+
+
+class FinnhubFundamentalsProvider:
+    """Provider de fundamentals sobre Finnhub `/stock/metric?metric=all` (§5.3).
+
+    Cumple el protocolo `FundamentalsProvider`. Finnhub devuelve márgenes y
+    crecimiento como PORCENTAJE (74.15 = 74.15%); se pasan a fracción para igualar
+    la convención de FMP y del reasoner (que formatea ×100). P/E y deuda/equity ya
+    son ratios y van tal cual. Se persiste el `metric` crudo en `raw`.
+    """
+
+    def __init__(self, settings: Settings, client: httpx.Client | None = None) -> None:
+        if not settings.finnhub_api_key:
+            raise FundamentalsError("FINNHUB_API_KEY no configurada.")
+        self._api_key = settings.finnhub_api_key
+        self._client = client or httpx.Client(
+            base_url=settings.finnhub_base_url,
+            timeout=httpx.Timeout(15.0),
+        )
+
+    def fetch(self, ticker: str) -> Fundamentals | None:
+        """Trae y normaliza los fundamentals de un ticker (None si no hay métricas)."""
+        try:
+            resp = self._client.get(
+                "/stock/metric",
+                params={"symbol": ticker, "metric": "all", "token": self._api_key},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.HTTPError as exc:
+            raise FundamentalsError(
+                f"Fallo consultando Finnhub metric de {ticker}: {exc}"
+            ) from exc
+
+        metric = data.get("metric") if isinstance(data, dict) else None
+        if not metric:
+            logger.info("Finnhub sin métricas para %s.", ticker)
+            return None
+
+        return Fundamentals(
+            ticker=ticker,
+            pe=_num(metric.get("peTTM")),
+            revenue_growth=_pct_to_fraction(metric.get("revenueGrowthTTMYoy")),
+            gross_margin=_pct_to_fraction(metric.get("grossMarginTTM")),
+            debt_to_equity=_num(metric.get("totalDebt/totalEquityQuarterly")),
+            raw={"metric": metric},
+            source="finnhub",
+        )
+
+    def close(self) -> None:
+        self._client.close()
+
+    def __enter__(self) -> FinnhubFundamentalsProvider:
         return self
 
     def __exit__(self, *_exc: object) -> None:
