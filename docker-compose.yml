@@ -115,6 +115,8 @@ services:
       KUMA_ADMIN_USER: ${KUMA_ADMIN_USER:-admin}
       KUMA_ADMIN_PASSWORD: ${KUMA_ADMIN_PASSWORD}
       KUMA_PUSH_TOKEN: ${KUMA_PUSH_TOKEN}
+      # El monitor del gateway sigue el puerto real de la app (4004 paper/4003 live).
+      IB_GATEWAY_PORT: ${IB_GATEWAY_PORT:-4004}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
       COMPOSE_PROFILES: ${COMPOSE_PROFILES:-}

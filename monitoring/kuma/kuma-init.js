@@ -29,6 +29,10 @@ const ANALYTICS = (process.env.COMPOSE_PROFILES || "")
   .split(",")
   .map((s) => s.trim())
   .includes("analytics");
+// Puerto de la API del gateway: sigue al de la app (4004 paper / 4003 live).
+// Así el monitor chequea el mismo puerto que la app realmente usa.
+const GATEWAY_PORT = parseInt(process.env.IB_GATEWAY_PORT || "4004", 10);
+const GATEWAY_MONITOR_NAME = "IB Gateway API (tcp)";
 
 const TIMEOUT_MS = 240_000; // si Kuma no responde en 4 min, fallar el init
 
@@ -67,9 +71,9 @@ function monitorsWanted(notificationIDList) {
     }),
     mk({
       type: "port",
-      name: "IB Gateway API (tcp 4004)",
+      name: GATEWAY_MONITOR_NAME,
       hostname: "ib-gateway",
-      port: 4004,
+      port: GATEWAY_PORT,
     }),
     mk({
       type: "port",
@@ -234,26 +238,50 @@ async function main() {
     console.log("kuma-init: sin TELEGRAM_BOT_TOKEN/CHAT_ID → monitores sin notificación.");
   }
 
-  // 4. Monitores que falten (idempotente por nombre).
-  const existingNames = new Set(
-    Object.values(monitorList).map((m) => m.name),
-  );
-  let created = 0;
-  for (const monitor of monitorsWanted(notificationIDList)) {
-    if (existingNames.has(monitor.name)) {
-      console.log(`kuma-init: monitor "${monitor.name}" ya existe, salto.`);
-      continue;
-    }
-    const res = await emit(socket, "add", monitor);
-    if (res && res.ok) {
-      created += 1;
-      console.log(`kuma-init: monitor "${monitor.name}" creado (id ${res.monitorID}).`);
-    } else {
-      throw new Error(`no pude crear "${monitor.name}": ${res && res.msg}`);
+  // 4a. Limpieza de monitores legacy del gateway (nombre viejo con puerto,
+  //     ej: "IB Gateway API (tcp 4004)") — reemplazados por el nombre estable.
+  for (const m of Object.values(monitorList)) {
+    if (/^IB Gateway API \(tcp \d+\)$/.test(m.name)) {
+      await emit(socket, "deleteMonitor", m.id);
+      delete monitorList[m.id];
+      console.log(`kuma-init: monitor legacy "${m.name}" borrado.`);
     }
   }
 
-  console.log(`kuma-init: listo (${created} monitores nuevos).`);
+  // 4b. Reconciliación por nombre: crear los que falten y, si un monitor de
+  //     puerto ya existe pero apunta a otro puerto, corregirlo (idempotente).
+  const byName = {};
+  for (const m of Object.values(monitorList)) byName[m.name] = m;
+  let created = 0;
+  let updated = 0;
+  for (const monitor of monitorsWanted(notificationIDList)) {
+    const existing = byName[monitor.name];
+    if (!existing) {
+      const res = await emit(socket, "add", monitor);
+      if (!res || !res.ok) {
+        throw new Error(`no pude crear "${monitor.name}": ${res && res.msg}`);
+      }
+      created += 1;
+      console.log(`kuma-init: monitor "${monitor.name}" creado (id ${res.monitorID}).`);
+    } else if (monitor.type === "port" && existing.port !== monitor.port) {
+      const res = await emit(socket, "editMonitor", {
+        ...existing,
+        ...monitor,
+        id: existing.id,
+      });
+      if (!res || !res.ok) {
+        throw new Error(`no pude editar "${monitor.name}": ${res && res.msg}`);
+      }
+      updated += 1;
+      console.log(
+        `kuma-init: monitor "${monitor.name}" actualizado a puerto ${monitor.port}.`,
+      );
+    } else {
+      console.log(`kuma-init: monitor "${monitor.name}" ya existe, salto.`);
+    }
+  }
+
+  console.log(`kuma-init: listo (${created} nuevos, ${updated} actualizados).`);
   socket.close();
   process.exit(0);
 }
