@@ -19,10 +19,19 @@ logger = get_logger(__name__)
 _SYSTEM_PROMPT = (
     "Sos un asistente de análisis de inversiones READ-ONLY. NUNCA ejecutás "
     "órdenes: solo preparás una sugerencia breve para que el usuario decida y "
-    "ejecute manualmente en su broker. Respondé en español rioplatense, en 2 a 4 "
-    "oraciones, concreto y accionable. No inventes datos que no estén en el "
-    "contexto; si faltan fundamentals, decilo."
+    "ejecute manualmente en su broker. Según el veredicto del activo, la señal "
+    "puede ser para sumar en una caída, o para tomar ganancias / consolidar en "
+    "una suba. Respondé en español rioplatense, en 2 a 4 oraciones, concreto y "
+    "accionable. No inventes datos que no estén en el contexto; si faltan "
+    "fundamentals, decilo."
 )
+
+# Etiqueta legible de la acción a evaluar (deriva del veredicto en el gate).
+_ACTION_LABELS = {
+    "comprar_dip": "evaluar SUMAR en la caída",
+    "tomar_ganancias": "evaluar TOMAR GANANCIAS (reducir la posición)",
+    "consolidar": "evaluar CONSOLIDAR / rotar la posición",
+}
 
 
 class ReasoningError(RuntimeError):
@@ -50,14 +59,19 @@ def _format_fundamentals(context: ReasoningContext) -> str:
     return "Fundamentals: " + (", ".join(parts) if parts else "sin métricas.")
 
 
+def _action_label(context: ReasoningContext) -> str:
+    return _ACTION_LABELS.get(context.action, context.action)
+
+
 def _build_context_block(context: ReasoningContext) -> str:
     """Bloque de contexto que se le pasa al modelo."""
     lines = [
         f"Ticker: {context.ticker}",
-        f"Caída: {context.pct_change:+.2f}% en una ventana de "
+        f"Movimiento: {context.pct_change:+.2f}% en una ventana de "
         f"{context.window_minutes} minutos",
         f"Precio: {context.current_price:.2f} (referencia {context.reference_price:.2f})",
         f"Veredicto configurado: {context.verdict}",
+        f"Acción a evaluar: {_action_label(context)}",
         _format_fundamentals(context),
     ]
     if context.bucket_remaining is not None:
@@ -69,9 +83,11 @@ class TemplateReasoner:
     """Sugerencia determinística sin llamar a ninguna API (fallback / MVP)."""
 
     def generate(self, context: ReasoningContext) -> Suggestion:
+        arrow = "📉" if context.pct_change < 0 else "📈"
         header = (
-            f"📉 {context.ticker} {context.pct_change:+.1f}% "
-            f"(ventana {context.window_minutes}m). Veredicto: {context.verdict}."
+            f"{arrow} {context.ticker} {context.pct_change:+.1f}% "
+            f"(ventana {context.window_minutes}m). Veredicto: {context.verdict}. "
+            f"Acción: {_action_label(context)}."
         )
         body = _format_fundamentals(context)
         if context.bucket_remaining is not None:

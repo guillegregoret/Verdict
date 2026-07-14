@@ -31,14 +31,22 @@ def _fundamentals() -> FundamentalsRow:
     )
 
 
-def _context(fundamentals: FundamentalsRow | None = None, bucket: float | None = None):
+def _context(
+    fundamentals: FundamentalsRow | None = None,
+    bucket: float | None = None,
+    *,
+    pct_change: float = -5.2,
+    verdict: str = "Mantener",
+    action: str = "comprar_dip",
+):
     return ReasoningContext(
         ticker="NVDA",
-        pct_change=-5.2,
+        pct_change=pct_change,
         window_minutes=390,
-        verdict="Mantener",
+        verdict=verdict,
         current_price=95.0,
         reference_price=100.0,
+        action=action,
         fundamentals=fundamentals,
         bucket_remaining=bucket,
     )
@@ -74,6 +82,30 @@ def test_template_includes_key_fields() -> None:
 def test_template_handles_missing_fundamentals() -> None:
     s = TemplateReasoner().generate(_context(fundamentals=None))
     assert "no disponibles" in s.text
+
+
+def test_template_frames_take_profit_on_rise() -> None:
+    # una suba con acción tomar_ganancias → flecha ↑ y etiqueta de la acción
+    s = TemplateReasoner().generate(
+        _context(pct_change=6.0, verdict="Trim - tomar ganancias", action="tomar_ganancias")
+    )
+    assert "📈" in s.text
+    assert "TOMAR GANANCIAS" in s.text
+
+
+def test_context_carries_action_from_event() -> None:
+    event = TriggerEvent(
+        ticker="MU",
+        pct_change=6.1,
+        window_minutes=390,
+        reference_price=100.0,
+        current_price=106.1,
+        verdict="Trim - tomar ganancias",
+        trigger_type="rise_pct",
+        action="tomar_ganancias",
+    )
+    ctx = ReasoningContext.from_trigger_event(event)
+    assert ctx.action == "tomar_ganancias"
 
 
 # ── AnthropicReasoner con client fake ────────────────────────────────────────

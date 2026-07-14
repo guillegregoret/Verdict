@@ -18,6 +18,7 @@ class ReasoningContext:
     verdict: str
     current_price: float
     reference_price: float
+    action: str = "comprar_dip"  # comprar_dip | tomar_ganancias | consolidar
     fundamentals: FundamentalsRow | None = None
     bucket_remaining: float | None = None
 
@@ -36,6 +37,7 @@ class ReasoningContext:
             verdict=event.verdict,
             current_price=event.current_price,
             reference_price=event.reference_price,
+            action=event.action,
             fundamentals=fundamentals,
             bucket_remaining=bucket_remaining,
         )

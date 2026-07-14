@@ -115,9 +115,60 @@ def test_insufficient_data_is_skipped() -> None:
     assert eng.evaluate(now=NOW) == []
 
 
-def test_rise_does_not_trigger() -> None:
+def test_rise_does_not_trigger_buy_verdict() -> None:
+    # una SUBA en un veredicto de compra (Mantener) no dispara nada
     eng = _engine([_cfg("NVDA")], {"NVDA": 110.0}, {"NVDA": 100.0}, {"NVDA": "Mantener"})
     assert eng.evaluate(now=NOW) == []
+
+
+def test_rise_past_threshold_with_trim_verdict_emits_take_profit() -> None:
+    # MU en "Trim - tomar ganancias" sube +6% (> 4.5%) → aviso de tomar ganancias
+    eng = _engine(
+        [_cfg("MU")],
+        latest={"MU": 106.0},
+        reference={"MU": 100.0},
+        verdicts={"MU": "Trim - tomar ganancias"},
+    )
+    events = eng.evaluate(now=NOW)
+
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.ticker == "MU"
+    assert ev.pct_change == pytest.approx(6.0)
+    assert ev.trigger_type == "rise_pct"
+    assert ev.action == "tomar_ganancias"
+
+
+def test_rise_with_consolidar_verdict_emits_consolidate() -> None:
+    eng = _engine(
+        [_cfg("QCOM")], {"QCOM": 110.0}, {"QCOM": 100.0}, {"QCOM": "Consolidar"}
+    )
+    events = eng.evaluate(now=NOW)
+
+    assert len(events) == 1
+    assert events[0].action == "consolidar"
+    assert events[0].trigger_type == "rise_pct"
+
+
+def test_rise_below_threshold_not_emitted() -> None:
+    # sube 3% (< 4.5%) → no dispara
+    eng = _engine([_cfg("MU")], {"MU": 103.0}, {"MU": 100.0}, {"MU": "Trim - tomar ganancias"})
+    assert eng.evaluate(now=NOW) == []
+
+
+def test_drop_on_trim_verdict_not_emitted() -> None:
+    # un Trim que CAE no dispara (solo dispara al subir)
+    eng = _engine([_cfg("MU")], {"MU": 90.0}, {"MU": 100.0}, {"MU": "Trim - tomar ganancias"})
+    assert eng.evaluate(now=NOW) == []
+
+
+def test_non_actionable_verdict_never_triggers() -> None:
+    # "Mantener - no sumar" no dispara ni cayendo ni subiendo
+    capped = "Mantener - no sumar"
+    eng_drop = _engine([_cfg("AMD")], {"AMD": 80.0}, {"AMD": 100.0}, {"AMD": capped})
+    eng_rise = _engine([_cfg("AMD")], {"AMD": 120.0}, {"AMD": 100.0}, {"AMD": capped})
+    assert eng_drop.evaluate(now=NOW) == []
+    assert eng_rise.evaluate(now=NOW) == []
 
 
 def test_evaluates_multiple_tickers_independently() -> None:
