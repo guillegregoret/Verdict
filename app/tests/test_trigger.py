@@ -49,8 +49,15 @@ class FakeAlerts:
         return set(self._alerted)
 
 
-def _cfg(ticker: str, threshold: float = -4.5, window: int = 390) -> TickerConfig:
-    return TickerConfig(ticker=ticker, threshold_pct=threshold, window_minutes=window)
+def _cfg(
+    ticker: str, threshold: float = -4.5, window: int = 390, rise: float = 8.0
+) -> TickerConfig:
+    return TickerConfig(
+        ticker=ticker,
+        threshold_pct=threshold,
+        window_minutes=window,
+        rise_threshold_pct=rise,
+    )
 
 
 def _engine(
@@ -122,9 +129,9 @@ def test_rise_does_not_trigger_buy_verdict() -> None:
 
 
 def test_rise_past_threshold_with_trim_verdict_emits_take_profit() -> None:
-    # MU en "Trim - tomar ganancias" sube +6% (> 4.5%) → aviso de tomar ganancias
+    # MU en "Trim - tomar ganancias" sube +6% (> umbral de suba 4.5) → aviso
     eng = _engine(
-        [_cfg("MU")],
+        [_cfg("MU", rise=4.5)],
         latest={"MU": 106.0},
         reference={"MU": 100.0},
         verdicts={"MU": "Trim - tomar ganancias"},
@@ -137,6 +144,17 @@ def test_rise_past_threshold_with_trim_verdict_emits_take_profit() -> None:
     assert ev.pct_change == pytest.approx(6.0)
     assert ev.trigger_type == "rise_pct"
     assert ev.action == "tomar_ganancias"
+
+
+def test_rise_threshold_is_independent_from_drop_threshold() -> None:
+    # +6% NO alcanza el umbral de suba por defecto (8.0), aunque supere |drop|
+    eng = _engine(
+        [_cfg("MU", threshold=-4.5, rise=8.0)],
+        latest={"MU": 106.0},
+        reference={"MU": 100.0},
+        verdicts={"MU": "Trim - tomar ganancias"},
+    )
+    assert eng.evaluate(now=NOW) == []
 
 
 def test_rise_with_consolidar_verdict_emits_consolidate() -> None:

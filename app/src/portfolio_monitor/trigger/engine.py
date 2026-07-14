@@ -117,13 +117,14 @@ class TriggerEngine:
                 continue  # datos insuficientes en la ventana
 
             pct_change = (current - reference) / reference * 100.0
-            magnitude = abs(cfg.threshold_pct)   # umbral en magnitud, ambos lados
             if rule.direction == "drop":
-                if pct_change > -magnitude:
+                threshold = cfg.threshold_pct        # negativo (ej: -4.5)
+                if pct_change > threshold:
                     continue  # no cayó lo suficiente
                 trigger_type = "drop_pct"
             else:  # "rise"
-                if pct_change < magnitude:
+                threshold = cfg.rise_threshold_pct   # positivo (ej: +8.0)
+                if pct_change < threshold:
                     continue  # no subió lo suficiente
                 trigger_type = "rise_pct"
 
@@ -141,12 +142,12 @@ class TriggerEngine:
                 )
             )
             logger.info(
-                "Trigger %s (%s): %.2f%% en %dm (umbral ±%.2f%%, veredicto %s).",
+                "Trigger %s (%s): %.2f%% en %dm (umbral %.2f%%, veredicto %s).",
                 cfg.ticker,
                 rule.action,
                 pct_change,
                 cfg.window_minutes,
-                magnitude,
+                threshold,
                 verdict,
             )
 

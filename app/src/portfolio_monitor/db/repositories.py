@@ -35,11 +35,12 @@ class PricePoint:
 
 @dataclass(frozen=True)
 class TickerConfig:
-    """Config de trigger de un ticker (umbral + ventana)."""
+    """Config de trigger de un ticker (umbrales + ventana)."""
 
     ticker: str
-    threshold_pct: float
+    threshold_pct: float            # umbral de CAÍDA (negativo, ej: -4.5)
     window_minutes: int
+    rise_threshold_pct: float = 8.0  # umbral de SUBA (positivo, ej: +8.0)
 
 
 class TickerConfigRepository:
@@ -57,10 +58,10 @@ class TickerConfigRepository:
             return [row.ticker for row in conn.execute(stmt)]
 
     def enabled_configs(self) -> list[TickerConfig]:
-        """Config completa (umbral/ventana) de los tickers habilitados."""
+        """Config completa (umbrales/ventana) de los tickers habilitados."""
         stmt = text(
-            "SELECT ticker, threshold_pct, window_minutes FROM ticker_config "
-            "WHERE enabled = true ORDER BY ticker"
+            "SELECT ticker, threshold_pct, window_minutes, rise_threshold_pct "
+            "FROM ticker_config WHERE enabled = true ORDER BY ticker"
         )
         with self._engine.connect() as conn:
             return [
@@ -68,6 +69,7 @@ class TickerConfigRepository:
                     ticker=r.ticker,
                     threshold_pct=float(r.threshold_pct),
                     window_minutes=int(r.window_minutes),
+                    rise_threshold_pct=float(r.rise_threshold_pct),
                 )
                 for r in conn.execute(stmt)
             ]
