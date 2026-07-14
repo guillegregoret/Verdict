@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from portfolio_monitor.db.repositories import TickerConfig
+from portfolio_monitor.db.repositories import LastAlert, TickerConfig
 from portfolio_monitor.trigger import TriggerEngine
 
 NOW = datetime(2026, 1, 2, 15, 0, tzinfo=UTC)
@@ -22,15 +22,34 @@ class FakeConfig:
 
 
 class FakePrices:
-    def __init__(self, latest: dict[str, float], reference: dict[str, float]) -> None:
+    def __init__(
+        self,
+        latest: dict[str, float],
+        reference: dict[str, float],
+        at: dict[str, float] | None = None,
+        peak: dict[str, float] | None = None,
+        trough: dict[str, float] | None = None,
+    ) -> None:
         self._latest = latest
         self._reference = reference
+        self._at = at or {}
+        self._peak = peak or {}
+        self._trough = trough or {}
 
     def latest_price(self, ticker: str) -> float | None:
         return self._latest.get(ticker)
 
     def reference_price(self, ticker: str, since: datetime) -> float | None:
         return self._reference.get(ticker)
+
+    def price_at_or_before(self, ticker: str, ts: datetime) -> float | None:
+        return self._at.get(ticker)
+
+    def max_price_since(self, ticker: str, since: datetime) -> float | None:
+        return self._peak.get(ticker)
+
+    def min_price_since(self, ticker: str, since: datetime) -> float | None:
+        return self._trough.get(ticker)
 
 
 class FakeVerdicts:
@@ -42,11 +61,14 @@ class FakeVerdicts:
 
 
 class FakeAlerts:
-    def __init__(self, alerted: Iterable[str] = ()) -> None:
-        self._alerted = set(alerted)
+    def __init__(self, last: dict[str, LastAlert] | None = None) -> None:
+        self._last = last or {}
 
-    def alerted_tickers_since(self, since: datetime) -> set[str]:
-        return set(self._alerted)
+    def last_alert(self, ticker: str, since: datetime) -> LastAlert | None:
+        la = self._last.get(ticker)
+        if la is None or la.ts < since:
+            return None
+        return la
 
 
 def _cfg(
@@ -65,13 +87,16 @@ def _engine(
     latest: dict[str, float],
     reference: dict[str, float],
     verdicts: dict[str, str],
-    alerted: Iterable[str] = (),
+    last_alerts: dict[str, LastAlert] | None = None,
+    at: dict[str, float] | None = None,
+    peak: dict[str, float] | None = None,
+    trough: dict[str, float] | None = None,
 ) -> TriggerEngine:
     return TriggerEngine(
         configs=FakeConfig(configs),
-        prices=FakePrices(latest, reference),
+        prices=FakePrices(latest, reference, at=at, peak=peak, trough=trough),
         verdicts=FakeVerdicts(verdicts),
-        alerts=FakeAlerts(alerted),
+        alerts=FakeAlerts(last_alerts),
     )
 
 
@@ -105,15 +130,62 @@ def test_non_buy_verdict_blocked_by_gate() -> None:
     assert eng.evaluate(now=NOW) == []
 
 
-def test_cooldown_skips_already_alerted_ticker() -> None:
+def test_cooldown_suppresses_when_not_reverted() -> None:
+    # alertó hace 1h por una caída y el precio NO recuperó → sigue en cooldown
+    last = {"NVDA": LastAlert(NOW - timedelta(hours=1), pct_change=-6.0, trigger_type="drop_pct")}
     eng = _engine(
         [_cfg("NVDA")],
-        {"NVDA": 90.0},
-        {"NVDA": 100.0},
-        {"NVDA": "Mantener"},
-        alerted=["NVDA"],
+        latest={"NVDA": 90.0},
+        reference={"NVDA": 100.0},
+        verdicts={"NVDA": "Mantener"},
+        last_alerts=last,
+        at={"NVDA": 94.0},    # precio al alertar (referencia previa ≈ 100)
+        peak={"NVDA": 95.0},  # no superó 97 (mitad del -6%) → no revirtió
     )
     assert eng.evaluate(now=NOW) == []
+
+
+def test_cooldown_resets_after_recovery() -> None:
+    # mismo caso pero el precio recuperó por encima del nivel → re-arma y vuelve a avisar
+    last = {"NVDA": LastAlert(NOW - timedelta(hours=3), pct_change=-6.0, trigger_type="drop_pct")}
+    eng = _engine(
+        [_cfg("NVDA")],
+        latest={"NVDA": 90.0},
+        reference={"NVDA": 100.0},
+        verdicts={"NVDA": "Mantener"},
+        last_alerts=last,
+        at={"NVDA": 94.0},    # referencia previa ≈ 100
+        peak={"NVDA": 98.0},  # recuperó por encima de 97 → revirtió → cooldown liberado
+    )
+    assert len(eng.evaluate(now=NOW)) == 1
+
+
+def test_cooldown_rise_resets_after_pullback() -> None:
+    # alertó por una suba (+10%) y luego retrocedió lo suficiente → re-arma
+    last = {"MU": LastAlert(NOW - timedelta(hours=2), pct_change=10.0, trigger_type="rise_pct")}
+    eng = _engine(
+        [_cfg("MU", rise=8.0)],
+        latest={"MU": 112.0},          # +12% nuevo rally
+        reference={"MU": 100.0},
+        verdicts={"MU": "Trim - tomar ganancias"},
+        last_alerts=last,
+        at={"MU": 110.0},              # referencia previa ≈ 100
+        trough={"MU": 104.0},          # retrocedió a ≤ 105 (mitad del +10%) → revirtió
+    )
+    assert len(eng.evaluate(now=NOW)) == 1
+
+
+def test_cooldown_ignores_alert_outside_lookback() -> None:
+    # una alerta de hace 2 días queda fuera de la ventana → no genera cooldown
+    last = {"NVDA": LastAlert(NOW - timedelta(days=2), pct_change=-6.0, trigger_type="drop_pct")}
+    eng = _engine(
+        [_cfg("NVDA")],
+        latest={"NVDA": 90.0},
+        reference={"NVDA": 100.0},
+        verdicts={"NVDA": "Mantener"},
+        last_alerts=last,
+    )
+    assert len(eng.evaluate(now=NOW)) == 1
 
 
 def test_insufficient_data_is_skipped() -> None:

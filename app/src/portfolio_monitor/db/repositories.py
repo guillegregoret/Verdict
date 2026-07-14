@@ -123,6 +123,34 @@ class PriceRepository:
             row = conn.execute(stmt, {"t": ticker, "since": since}).one_or_none()
         return float(row.price) if row else None
 
+    def price_at_or_before(self, ticker: str, ts: datetime) -> float | None:
+        """Precio vigente en `ts` (el último ≤ ts) — precio al momento de una alerta."""
+        stmt = text(
+            "SELECT price FROM prices WHERE ticker = :t AND ts <= :ts "
+            "ORDER BY ts DESC LIMIT 1"
+        )
+        with self._engine.connect() as conn:
+            row = conn.execute(stmt, {"t": ticker, "ts": ts}).one_or_none()
+        return float(row.price) if row else None
+
+    def max_price_since(self, ticker: str, since: datetime) -> float | None:
+        """Precio máximo estrictamente después de `since` (recuperación tras caída)."""
+        stmt = text(
+            "SELECT max(price) AS p FROM prices WHERE ticker = :t AND ts > :since"
+        )
+        with self._engine.connect() as conn:
+            row = conn.execute(stmt, {"t": ticker, "since": since}).one_or_none()
+        return float(row.p) if row and row.p is not None else None
+
+    def min_price_since(self, ticker: str, since: datetime) -> float | None:
+        """Precio mínimo estrictamente después de `since` (retroceso tras suba)."""
+        stmt = text(
+            "SELECT min(price) AS p FROM prices WHERE ticker = :t AND ts > :since"
+        )
+        with self._engine.connect() as conn:
+            row = conn.execute(stmt, {"t": ticker, "since": since}).one_or_none()
+        return float(row.p) if row and row.p is not None else None
+
 
 class PositionLike(Protocol):
     """Forma estructural de una posición (evita acoplar db → data.ibkr)."""
@@ -210,6 +238,15 @@ class HoldingsRepository:
             }
 
 
+@dataclass(frozen=True)
+class LastAlert:
+    """Última alerta de un ticker — insumo del cooldown con reset por reversión."""
+
+    ts: datetime
+    pct_change: float
+    trigger_type: str        # "drop_pct" | "rise_pct"
+
+
 class AlertRepository:
     """Auditoría de alertas emitidas + soporte de cooldown (§5.5)."""
 
@@ -221,6 +258,22 @@ class AlertRepository:
         stmt = text("SELECT DISTINCT ticker FROM alerts WHERE ts >= :since")
         with self._engine.connect() as conn:
             return {r.ticker for r in conn.execute(stmt, {"since": since})}
+
+    def last_alert(self, ticker: str, since: datetime) -> LastAlert | None:
+        """Última alerta del ticker desde `since` (None si no hubo en la ventana)."""
+        stmt = text(
+            "SELECT ts, pct_change, trigger_type FROM alerts "
+            "WHERE ticker = :t AND ts >= :since ORDER BY ts DESC LIMIT 1"
+        )
+        with self._engine.connect() as conn:
+            row = conn.execute(stmt, {"t": ticker, "since": since}).one_or_none()
+        if row is None:
+            return None
+        return LastAlert(
+            ts=row.ts,
+            pct_change=float(row.pct_change),
+            trigger_type=row.trigger_type,
+        )
 
     def record(
         self,

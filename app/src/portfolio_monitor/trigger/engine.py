@@ -25,6 +25,7 @@ from sqlalchemy import Engine
 from ..db.repositories import (
     AlertRepository,
     HoldingsRepository,
+    LastAlert,
     PriceRepository,
     TickerConfig,
     TickerConfigRepository,
@@ -33,6 +34,11 @@ from ..logging import get_logger
 from .verdict_gate import trigger_rule
 
 logger = get_logger(__name__)
+
+# Fracción del movimiento que el precio debe retroceder para re-armar el cooldown
+# (§5.5): 0.5 = el precio revierte a mitad de camino del pico/piso hacia la
+# referencia previa. Ej: cayó -6% → re-arma si recupera a -3% de la referencia.
+_RECOVERY_FRACTION = 0.5
 
 
 @dataclass(frozen=True)
@@ -57,6 +63,9 @@ class ConfigSource(Protocol):
 class PriceReader(Protocol):
     def latest_price(self, ticker: str) -> float | None: ...
     def reference_price(self, ticker: str, since: datetime) -> float | None: ...
+    def price_at_or_before(self, ticker: str, ts: datetime) -> float | None: ...
+    def max_price_since(self, ticker: str, since: datetime) -> float | None: ...
+    def min_price_since(self, ticker: str, since: datetime) -> float | None: ...
 
 
 class VerdictSource(Protocol):
@@ -64,7 +73,7 @@ class VerdictSource(Protocol):
 
 
 class CooldownSource(Protocol):
-    def alerted_tickers_since(self, since: datetime) -> set[str]: ...
+    def last_alert(self, ticker: str, since: datetime) -> LastAlert | None: ...
 
 
 class TriggerEngine:
@@ -76,11 +85,13 @@ class TriggerEngine:
         prices: PriceReader,
         verdicts: VerdictSource,
         alerts: CooldownSource,
+        cooldown_hours: int = 24,
     ) -> None:
         self._configs = configs
         self._prices = prices
         self._verdicts = verdicts
         self._alerts = alerts
+        self._cooldown_hours = cooldown_hours
 
     @classmethod
     def from_engine(cls, engine: Engine) -> TriggerEngine:
@@ -95,16 +106,10 @@ class TriggerEngine:
     def evaluate(self, now: datetime | None = None) -> list[TriggerEvent]:
         """Un ciclo de evaluación. Devuelve los eventos accionables detectados."""
         now = now or datetime.now(UTC)
-        # Cooldown: una alerta por ticker por día (§5.5).
-        day_start = datetime(now.year, now.month, now.day, tzinfo=UTC)
-        alerted_today = self._alerts.alerted_tickers_since(day_start)
         verdicts = self._verdicts.verdicts_by_ticker()
 
         events: list[TriggerEvent] = []
         for cfg in self._configs.enabled_configs():
-            if cfg.ticker in alerted_today:
-                continue  # ya alertado hoy
-
             verdict = verdicts.get(cfg.ticker)
             rule = trigger_rule(verdict)
             if rule is None:
@@ -127,6 +132,10 @@ class TriggerEngine:
                 if pct_change < threshold:
                     continue  # no subió lo suficiente
                 trigger_type = "rise_pct"
+
+            # Cooldown (§5.5): supprime si ya alertó y el precio NO revirtió aún.
+            if self._on_cooldown(cfg.ticker, now):
+                continue
 
             assert verdict is not None  # trigger_rule() ya lo garantizó
             events.append(
@@ -152,3 +161,33 @@ class TriggerEngine:
             )
 
         return events
+
+    def _on_cooldown(self, ticker: str, now: datetime) -> bool:
+        """True si el ticker ya alertó dentro de la ventana y aún NO revirtió (§5.5).
+
+        Sin alerta reciente → libre. Con alerta reciente, se re-arma solo si el
+        precio retrocedió `_RECOVERY_FRACTION` del movimiento hacia la referencia
+        previa (así un segundo dip/rally genuino vuelve a avisar, sin spamear el mismo).
+        """
+        since = now - timedelta(hours=self._cooldown_hours)
+        last = self._alerts.last_alert(ticker, since)
+        if last is None:
+            return False
+        return not self._reverted_since(ticker, last)
+
+    def _reverted_since(self, ticker: str, last: LastAlert) -> bool:
+        """¿El precio revirtió lo suficiente desde la última alerta para re-armar?"""
+        alert_price = self._prices.price_at_or_before(ticker, last.ts)
+        if alert_price is None or (1 + last.pct_change / 100) == 0:
+            return False  # no podemos evaluar → conservador (sigue en cooldown)
+
+        # Referencia pre-movimiento reconstruida desde el pct_change guardado.
+        pre = alert_price / (1 + last.pct_change / 100)
+        recover_level = pre * (1 + last.pct_change * (1 - _RECOVERY_FRACTION) / 100)
+
+        if last.trigger_type == "drop_pct":
+            peak = self._prices.max_price_since(ticker, last.ts)
+            return peak is not None and peak >= recover_level
+        # rise_pct: revierte si retrocede hacia abajo
+        trough = self._prices.min_price_since(ticker, last.ts)
+        return trough is not None and trough <= recover_level
