@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from portfolio_monitor.config import Settings
 from portfolio_monitor.db.repositories import FundamentalsRow
+from portfolio_monitor.fundamentals import FundamentalsEvent
 from portfolio_monitor.notifier import NotifierError
 from portfolio_monitor.reasoning import ReasoningContext, ReasoningError, Suggestion
 from portfolio_monitor.scheduler import AlertPipeline, Scheduler
@@ -153,6 +154,47 @@ def test_fundamentals_error_does_not_break_alert() -> None:
     assert pipeline.run_once() == 1
     assert notifier.sent == ["sugerencia NVDA"]
     assert reasoning.contexts[0].fundamentals is None
+
+
+class FakeDecayMonitor:
+    def __init__(self, events: list[FundamentalsEvent]) -> None:
+        self._events = events
+
+    def evaluate(self) -> list[FundamentalsEvent]:
+        return list(self._events)
+
+
+def _decay_event(ticker: str = "NVDA") -> FundamentalsEvent:
+    cur = FundamentalsRow(
+        ticker=ticker, ts=datetime(2026, 7, 1, tzinfo=UTC), pe=30.0,
+        revenue_growth=0.50, gross_margin=0.68, debt_to_equity=0.3,
+    )
+    base = FundamentalsRow(
+        ticker=ticker, ts=datetime(2026, 4, 1, tzinfo=UTC), pe=30.0,
+        revenue_growth=0.70, gross_margin=0.75, debt_to_equity=0.3,
+    )
+    return FundamentalsEvent(
+        ticker=ticker, verdict="Mantener",
+        reasons=("margen bruto 75.0% → 68.0%",), current=cur, baseline=base,
+    )
+
+
+def test_fundamentals_decay_event_is_alerted() -> None:
+    reasoning = FakeReasoning()
+    notifier = FakeNotifier()
+    alerts = FakeAlerts()
+    pipeline = AlertPipeline(
+        trigger=FakeTrigger([]),
+        fundamentals=FakeFundamentals(),
+        reasoning=reasoning,
+        notifier=notifier,
+        alerts=alerts,
+        fundamentals_monitor=FakeDecayMonitor([_decay_event("NVDA")]),
+    )
+    assert pipeline.run_once() == 1
+    assert notifier.sent == ["sugerencia NVDA"]
+    assert reasoning.contexts[0].signal_kind == "fundamentals_decay"
+    assert alerts.records[0]["trigger_type"] == "fundamentals_decay"
 
 
 # ── Scheduler ────────────────────────────────────────────────────────────────

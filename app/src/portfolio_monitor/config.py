@@ -51,6 +51,17 @@ class Settings(BaseSettings):
     # trimestral—, así que 24h evita pegarle a FMP en cada alerta).
     fundamentals_max_age_hours: int = 24
 
+    # ── Deterioro de fundamentals (§5.3) ─────────────────────────────────────
+    # Compara el último snapshot contra un baseline ≥ N días más viejo (capta el
+    # cambio trimestral). Requiere ese historial acumulado antes de poder disparar.
+    fundamentals_refresh_every_ticks: int = 720   # refresca held names cada N ticks (0=off)
+    fundamentals_baseline_min_age_days: int = 45  # antigüedad mínima del baseline
+    fundamentals_decay_cooldown_days: int = 30    # 1 aviso de deterioro por ticker / N días
+    # Umbrales de deterioro (en la escala de cada métrica):
+    fund_revenue_growth_drop_pp: float = 15.0  # caída del crecimiento (puntos %)
+    fund_margin_drop_pp: float = 5.0           # compresión del margen bruto (puntos %)
+    fund_debt_rise: float = 0.5                # salto de deuda/equity (ratio absoluto)
+
     # ── Anthropic (razonamiento) ─────────────────────────────────────────────
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-opus-4-8"

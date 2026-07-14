@@ -1,20 +1,24 @@
 """Entrypoint del monolito: arranca el scheduler que corre el loop completo (§2).
 
-Cada tick: (sync de holdings IBKR, throttleado) → price poller → trigger →
-fundamentals → reasoning → Telegram. El sync de holdings (§11.3) es best-effort:
-si el gateway no logueó (2FA pendiente), loguea y sigue sin tumbar el loop.
+Cada tick: (sync de holdings IBKR + refresh de fundamentals, throttleados) →
+price poller → señales (movimiento de precio + deterioro de fundamentals) →
+reasoning → Telegram. Los jobs periódicos son best-effort: si fallan, loguean
+y siguen sin tumbar el loop.
 """
 
 from __future__ import annotations
 
 from contextlib import ExitStack
 
-from sqlalchemy import Engine
-
 from .config import Settings, get_settings
 from .data.finnhub import FinnhubClient, FinnhubFundamentalsProvider
 from .db.engine import get_engine
-from .fundamentals import FundamentalsService
+from .db.repositories import TickerConfigRepository
+from .fundamentals import (
+    FundamentalsMonitor,
+    FundamentalsRefreshService,
+    FundamentalsService,
+)
 from .holdings import HoldingsSyncService
 from .logging import get_logger, setup_logging
 from .monitoring import HealthcheckPinger
@@ -22,7 +26,6 @@ from .notifier import TelegramNotifier
 from .poller import PricePoller
 from .reasoning import AnthropicReasoner, ReasoningService, TemplateReasoner
 from .scheduler import AlertPipeline, Scheduler
-from .scheduler.pipeline import FundamentalsReader
 
 logger = get_logger(__name__)
 
@@ -34,21 +37,6 @@ def _build_reasoning(settings: Settings) -> ReasoningService:
         return ReasoningService(primary=AnthropicReasoner(settings), fallback=fallback)
     logger.warning("Sin ANTHROPIC_API_KEY: el reasoner usará solo el template.")
     return ReasoningService(primary=fallback)
-
-
-def _build_fundamentals(
-    settings: Settings, engine: Engine, stack: ExitStack
-) -> FundamentalsReader:
-    """FundamentalsService con Finnhub (/stock/metric) para el chequeo de tesis (§5.3).
-
-    Al gatillar un ticker trae P/E, crecimiento, margen y deuda y persiste el
-    snapshot; si el fetch falla, la alerta igual sale (best-effort en el pipeline).
-    Reutiliza la key de Finnhub que ya exige el price poller.
-    """
-    provider = stack.enter_context(FinnhubFundamentalsProvider(settings))
-    return FundamentalsService.from_engine(
-        provider, engine, max_age_hours=settings.fundamentals_max_age_hours
-    )
 
 
 def main() -> None:
@@ -66,9 +54,24 @@ def main() -> None:
             settings=settings, engine=engine, quotes=finnhub
         )
         reasoning = _build_reasoning(settings)
-        fundamentals = _build_fundamentals(settings, engine, stack)
+
+        # Fundamentals (§5.3): mismo provider Finnhub para el fetch on-trigger,
+        # el refresh periódico (historial) y el monitor de deterioro.
+        provider = stack.enter_context(FinnhubFundamentalsProvider(settings))
+        fundamentals = FundamentalsService.from_engine(
+            provider, engine, max_age_hours=settings.fundamentals_max_age_hours
+        )
+        fundamentals_refresh = FundamentalsRefreshService(
+            fundamentals, TickerConfigRepository(engine)
+        )
+        fundamentals_monitor = FundamentalsMonitor.from_engine(engine, settings)
+
         pipeline = AlertPipeline.from_engine(
-            engine, reasoning, notifier, fundamentals=fundamentals
+            engine,
+            reasoning,
+            notifier,
+            fundamentals=fundamentals,
+            fundamentals_monitor=fundamentals_monitor,
         )
         holdings_sync = HoldingsSyncService.from_engine(settings, engine)
         Scheduler(
@@ -77,6 +80,7 @@ def main() -> None:
             pipeline=pipeline,
             pinger=pinger,
             holdings_sync=holdings_sync,
+            fundamentals_refresh=fundamentals_refresh,
         ).run_forever()
 
 

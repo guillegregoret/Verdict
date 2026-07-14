@@ -28,6 +28,10 @@ class FundamentalsStore(Protocol):
     def latest(self, ticker: str) -> FundamentalsRow | None: ...
 
 
+class TickerSource(Protocol):
+    def enabled_tickers(self) -> list[str]: ...
+
+
 class FundamentalsService:
     """Orquesta fetch de fundamentals → persistencia + lectura con freshness."""
 
@@ -95,3 +99,21 @@ class FundamentalsService:
             saved += 1
         logger.info("Refresh de fundamentals: %d/%d guardados.", saved, len(tickers))
         return saved
+
+
+class FundamentalsRefreshService:
+    """Refresca los fundamentals de los tickers habilitados (§5.3).
+
+    Construye el historial de snapshots que el FundamentalsMonitor compara para
+    detectar deterioro. Pensado para correr throttleado en el scheduler (los
+    fundamentals cambian lento). `run_once()` para encajar con el patrón del loop.
+    """
+
+    def __init__(
+        self, service: FundamentalsService, tickers: TickerSource
+    ) -> None:
+        self._service = service
+        self._tickers = tickers
+
+    def run_once(self) -> int:
+        return self._service.refresh(self._tickers.enabled_tickers())

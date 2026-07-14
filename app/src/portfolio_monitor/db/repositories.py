@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from sqlalchemy import Engine, text
@@ -259,19 +259,30 @@ class AlertRepository:
         with self._engine.connect() as conn:
             return {r.ticker for r in conn.execute(stmt, {"since": since})}
 
-    def last_alert(self, ticker: str, since: datetime) -> LastAlert | None:
-        """Última alerta del ticker desde `since` (None si no hubo en la ventana)."""
+    def last_alert(
+        self, ticker: str, since: datetime, trigger_type: str | None = None
+    ) -> LastAlert | None:
+        """Última alerta del ticker desde `since` (None si no hubo en la ventana).
+
+        Si se pasa `trigger_type`, filtra por ese tipo (para cooldowns separados,
+        ej: el deterioro de fundamentals no interfiere con las alertas de precio).
+        """
+        where = "ticker = :t AND ts >= :since"
+        params: dict[str, object] = {"t": ticker, "since": since}
+        if trigger_type is not None:
+            where += " AND trigger_type = :tt"
+            params["tt"] = trigger_type
         stmt = text(
-            "SELECT ts, pct_change, trigger_type FROM alerts "
-            "WHERE ticker = :t AND ts >= :since ORDER BY ts DESC LIMIT 1"
+            f"SELECT ts, pct_change, trigger_type FROM alerts "  # noqa: S608 (where fijo)
+            f"WHERE {where} ORDER BY ts DESC LIMIT 1"
         )
         with self._engine.connect() as conn:
-            row = conn.execute(stmt, {"t": ticker, "since": since}).one_or_none()
+            row = conn.execute(stmt, params).one_or_none()
         if row is None:
             return None
         return LastAlert(
             ts=row.ts,
-            pct_change=float(row.pct_change),
+            pct_change=float(row.pct_change) if row.pct_change is not None else 0.0,
             trigger_type=row.trigger_type,
         )
 
@@ -372,6 +383,20 @@ class FundamentalsRepository:
                 },
             )
 
+    @staticmethod
+    def _row_from(row: Any) -> FundamentalsRow:
+        def _f(v: Any) -> float | None:
+            return float(v) if v is not None else None
+
+        return FundamentalsRow(
+            ticker=row.ticker,
+            ts=row.ts,
+            pe=_f(row.pe),
+            revenue_growth=_f(row.revenue_growth),
+            gross_margin=_f(row.gross_margin),
+            debt_to_equity=_f(row.debt_to_equity),
+        )
+
     def latest(self, ticker: str) -> FundamentalsRow | None:
         """Último snapshot de fundamentals de un ticker (para el §5.3)."""
         stmt = text(
@@ -382,22 +407,30 @@ class FundamentalsRepository:
         )
         with self._engine.connect() as conn:
             row = conn.execute(stmt, {"t": ticker}).one_or_none()
+        return self._row_from(row) if row is not None else None
+
+    def latest_and_baseline(
+        self, ticker: str, min_gap_days: int
+    ) -> tuple[FundamentalsRow, FundamentalsRow] | None:
+        """(último, baseline) donde baseline es el snapshot más reciente que sea
+        al menos `min_gap_days` más viejo que el último. None si falta alguno
+        (no hay historial suficiente para comparar el cambio trimestral)."""
+        latest = self.latest(ticker)
+        if latest is None:
+            return None
+        cutoff = latest.ts - timedelta(days=min_gap_days)
+        stmt = text(
+            """
+            SELECT ticker, ts, pe, revenue_growth, gross_margin, debt_to_equity
+            FROM fundamentals WHERE ticker = :t AND ts <= :cutoff
+            ORDER BY ts DESC LIMIT 1
+            """
+        )
+        with self._engine.connect() as conn:
+            row = conn.execute(stmt, {"t": ticker, "cutoff": cutoff}).one_or_none()
         if row is None:
             return None
-        return FundamentalsRow(
-            ticker=row.ticker,
-            ts=row.ts,
-            pe=float(row.pe) if row.pe is not None else None,
-            revenue_growth=(
-                float(row.revenue_growth) if row.revenue_growth is not None else None
-            ),
-            gross_margin=(
-                float(row.gross_margin) if row.gross_margin is not None else None
-            ),
-            debt_to_equity=(
-                float(row.debt_to_equity) if row.debt_to_equity is not None else None
-            ),
-        )
+        return latest, self._row_from(row)
 
 
 class DataSourceHealthRepository:

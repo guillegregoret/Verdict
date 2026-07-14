@@ -19,18 +19,19 @@ logger = get_logger(__name__)
 _SYSTEM_PROMPT = (
     "Sos un asistente de análisis de inversiones READ-ONLY. NUNCA ejecutás "
     "órdenes: solo preparás una sugerencia breve para que el usuario decida y "
-    "ejecute manualmente en su broker. Según el veredicto del activo, la señal "
-    "puede ser para sumar en una caída, o para tomar ganancias / consolidar en "
-    "una suba. Respondé en español rioplatense, en 2 a 4 oraciones, concreto y "
-    "accionable. No inventes datos que no estén en el contexto; si faltan "
-    "fundamentals, decilo."
+    "ejecute manualmente en su broker. La señal puede ser: sumar en una caída, "
+    "tomar ganancias / consolidar en una suba, o un DETERIORO de fundamentals "
+    "(la tesis se estaría rompiendo → revisar/reducir). Respondé en español "
+    "rioplatense, en 2 a 4 oraciones, concreto y accionable. No inventes datos "
+    "que no estén en el contexto; si faltan fundamentals, decilo."
 )
 
-# Etiqueta legible de la acción a evaluar (deriva del veredicto en el gate).
+# Etiqueta legible de la acción a evaluar (deriva del veredicto / la señal).
 _ACTION_LABELS = {
     "comprar_dip": "evaluar SUMAR en la caída",
     "tomar_ganancias": "evaluar TOMAR GANANCIAS (reducir la posición)",
     "consolidar": "evaluar CONSOLIDAR / rotar la posición",
+    "revisar_tesis": "REVISAR LA TESIS (fundamentals deteriorados)",
 }
 
 
@@ -64,7 +65,16 @@ def _action_label(context: ReasoningContext) -> str:
 
 
 def _build_context_block(context: ReasoningContext) -> str:
-    """Bloque de contexto que se le pasa al modelo."""
+    """Bloque de contexto que se le pasa al modelo (según el tipo de señal)."""
+    if context.signal_kind == "fundamentals_decay":
+        return "\n".join([
+            f"Ticker: {context.ticker}",
+            f"Veredicto configurado: {context.verdict}",
+            "Señal: DETERIORO de fundamentals (la tesis podría estar rompiéndose).",
+            f"Qué empeoró: {context.note}",
+            f"Acción a evaluar: {_action_label(context)}",
+            _format_fundamentals(context),
+        ])
     lines = [
         f"Ticker: {context.ticker}",
         f"Movimiento: {context.pct_change:+.2f}% en una ventana de "
@@ -83,6 +93,13 @@ class TemplateReasoner:
     """Sugerencia determinística sin llamar a ninguna API (fallback / MVP)."""
 
     def generate(self, context: ReasoningContext) -> Suggestion:
+        if context.signal_kind == "fundamentals_decay":
+            text = (
+                f"⚠️ {context.ticker} ({context.verdict}): fundamentals deteriorados "
+                f"— {context.note}. Revisá la tesis."
+            )
+            return Suggestion(text=text, source="template")
+
         arrow = "📉" if context.pct_change < 0 else "📈"
         header = (
             f"{arrow} {context.ticker} {context.pct_change:+.1f}% "

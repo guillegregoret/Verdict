@@ -93,6 +93,17 @@ def test_template_frames_take_profit_on_rise() -> None:
     assert "TOMAR GANANCIAS" in s.text
 
 
+def test_template_frames_fundamentals_decay() -> None:
+    ctx = ReasoningContext(
+        ticker="NVDA", verdict="Mantener", signal_kind="fundamentals_decay",
+        action="revisar_tesis", note="margen bruto 75.0% → 68.0%",
+    )
+    s = TemplateReasoner().generate(ctx)
+    assert "⚠️" in s.text
+    assert "deteriorados" in s.text
+    assert "margen bruto" in s.text
+
+
 def test_context_carries_action_from_event() -> None:
     event = TriggerEvent(
         ticker="MU",
