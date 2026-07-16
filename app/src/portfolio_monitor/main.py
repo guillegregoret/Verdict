@@ -11,9 +11,14 @@ from __future__ import annotations
 from contextlib import ExitStack
 
 from .config import Settings, get_settings
-from .data.finnhub import FinnhubClient, FinnhubFundamentalsProvider
+from .data.finnhub import (
+    FinnhubClient,
+    FinnhubEarningsProvider,
+    FinnhubFundamentalsProvider,
+)
 from .db.engine import get_engine
 from .db.repositories import TickerConfigRepository
+from .earnings import EarningsService
 from .fundamentals import (
     FundamentalsMonitor,
     FundamentalsRefreshService,
@@ -66,6 +71,12 @@ def main() -> None:
         )
         fundamentals_monitor = FundamentalsMonitor.from_engine(engine, settings)
 
+        # Calendario de earnings (§5 informativo): mismo Finnhub, refresh diario.
+        earnings_provider = stack.enter_context(FinnhubEarningsProvider(settings))
+        earnings_refresh = EarningsService.from_engine(
+            earnings_provider, engine, horizon_days=settings.earnings_horizon_days
+        )
+
         pipeline = AlertPipeline.from_engine(
             engine,
             reasoning,
@@ -81,6 +92,7 @@ def main() -> None:
             pinger=pinger,
             holdings_sync=holdings_sync,
             fundamentals_refresh=fundamentals_refresh,
+            earnings_refresh=earnings_refresh,
         ).run_forever()
 
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Protocol
 
 from sqlalchemy import Engine, text
@@ -431,6 +431,97 @@ class FundamentalsRepository:
         if row is None:
             return None
         return latest, self._row_from(row)
+
+
+class EarningsLike(Protocol):
+    """Forma estructural de un evento de earnings (evita acoplar db → data)."""
+
+    ticker: str
+    earnings_date: date
+    hour: str
+    eps_estimate: float | None
+    eps_actual: float | None
+    revenue_estimate: float | None
+    revenue_actual: float | None
+
+
+@dataclass(frozen=True)
+class UpcomingEarnings:
+    """Earnings próximo (leído) con el veredicto del holding para contexto."""
+
+    ticker: str
+    earnings_date: date
+    hour: str
+    eps_estimate: float | None
+    verdict: str | None
+
+
+class EarningsRepository:
+    """Persistencia y lectura del calendario de earnings (§5 informativo)."""
+
+    def __init__(self, engine: Engine) -> None:
+        self._engine = engine
+
+    def upsert_many(self, events: Sequence[EarningsLike]) -> int:
+        """Upsert de eventos por (ticker, earnings_date). Devuelve cuántos se enviaron."""
+        if not events:
+            return 0
+        stmt = text(
+            """
+            INSERT INTO earnings
+                (ticker, earnings_date, hour, eps_estimate, eps_actual,
+                 revenue_estimate, revenue_actual, updated_at)
+            VALUES
+                (:ticker, :earnings_date, :hour, :eps_estimate, :eps_actual,
+                 :revenue_estimate, :revenue_actual, now())
+            ON CONFLICT (ticker, earnings_date) DO UPDATE SET
+                hour = EXCLUDED.hour,
+                eps_estimate = EXCLUDED.eps_estimate,
+                eps_actual = EXCLUDED.eps_actual,
+                revenue_estimate = EXCLUDED.revenue_estimate,
+                revenue_actual = EXCLUDED.revenue_actual,
+                updated_at = now()
+            """
+        )
+        rows = [
+            {
+                "ticker": e.ticker,
+                "earnings_date": e.earnings_date,
+                "hour": e.hour,
+                "eps_estimate": e.eps_estimate,
+                "eps_actual": e.eps_actual,
+                "revenue_estimate": e.revenue_estimate,
+                "revenue_actual": e.revenue_actual,
+            }
+            for e in events
+        ]
+        with self._engine.begin() as conn:
+            conn.execute(stmt, rows)
+        return len(rows)
+
+    def upcoming(self, start: date, end: date) -> list[UpcomingEarnings]:
+        """Earnings entre [start, end] con el veredicto del holding (para el aviso)."""
+        stmt = text(
+            """
+            SELECT e.ticker, e.earnings_date, e.hour, e.eps_estimate,
+                   (SELECT verdict FROM holdings WHERE ticker = e.ticker LIMIT 1) AS verdict
+            FROM earnings e
+            WHERE e.earnings_date >= :start AND e.earnings_date <= :end
+            ORDER BY e.earnings_date, e.ticker
+            """
+        )
+        with self._engine.connect() as conn:
+            rows = conn.execute(stmt, {"start": start, "end": end}).all()
+        return [
+            UpcomingEarnings(
+                ticker=r.ticker,
+                earnings_date=r.earnings_date,
+                hour=r.hour or "",
+                eps_estimate=float(r.eps_estimate) if r.eps_estimate is not None else None,
+                verdict=r.verdict,
+            )
+            for r in rows
+        ]
 
 
 class DataSourceHealthRepository:

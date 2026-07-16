@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     fund_margin_drop_pp: float = 5.0           # compresión del margen bruto (puntos %)
     fund_debt_rise: float = 0.5                # salto de deuda/equity (ratio absoluto)
 
+    # ── Earnings (§5 informativo) ────────────────────────────────────────────
+    earnings_refresh_every_ticks: int = 1440  # refresca el calendario cada N ticks (0=off)
+    earnings_horizon_days: int = 120          # días hacia adelante a traer
+
     # ── Anthropic (razonamiento) ─────────────────────────────────────────────
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-opus-4-8"

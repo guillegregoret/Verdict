@@ -43,6 +43,7 @@ class Scheduler:
         pinger: PingerLike | None = None,
         holdings_sync: PeriodicTask | None = None,
         fundamentals_refresh: PeriodicTask | None = None,
+        earnings_refresh: PeriodicTask | None = None,
     ) -> None:
         self._settings = settings
         self._poller = poller
@@ -50,6 +51,7 @@ class Scheduler:
         self._pinger = pinger
         self._holdings_sync = holdings_sync
         self._fundamentals_refresh = fundamentals_refresh
+        self._earnings_refresh = earnings_refresh
         self._ticks = 0
 
     def tick(self) -> None:
@@ -64,6 +66,11 @@ class Scheduler:
             self._fundamentals_refresh,
             self._settings.fundamentals_refresh_every_ticks,
             "Fundamentals refresh",
+        )
+        self._maybe_run(
+            self._earnings_refresh,
+            self._settings.earnings_refresh_every_ticks,
+            "Earnings refresh",
         )
         self._poller.poll_once()
         self._pipeline.run_once()

@@ -9,7 +9,7 @@ poller; los fundamentals se traen solo on-trigger (pocos), así que no molesta.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -152,6 +152,82 @@ class FinnhubFundamentalsProvider:
         self._client.close()
 
     def __enter__(self) -> FinnhubFundamentalsProvider:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+
+@dataclass(frozen=True)
+class EarningsEvent:
+    """Un evento de earnings (fecha reportada o estimada) de Finnhub."""
+
+    ticker: str
+    earnings_date: date
+    hour: str                      # 'bmo' | 'amc' | 'dmh' | ''
+    eps_estimate: float | None
+    eps_actual: float | None
+    revenue_estimate: float | None
+    revenue_actual: float | None
+
+
+class FinnhubEarningsProvider:
+    """Calendario de earnings sobre Finnhub `/calendar/earnings` (free tier)."""
+
+    def __init__(self, settings: Settings, client: httpx.Client | None = None) -> None:
+        if not settings.finnhub_api_key:
+            raise FinnhubError("FINNHUB_API_KEY no configurada.")
+        self._api_key = settings.finnhub_api_key
+        self._client = client or httpx.Client(
+            base_url=settings.finnhub_base_url,
+            timeout=httpx.Timeout(15.0),
+        )
+
+    def fetch_upcoming(self, ticker: str, horizon_days: int = 120) -> list[EarningsEvent]:
+        """Earnings de `ticker` desde hoy hasta +horizon_days."""
+        today = datetime.now(UTC).date()
+        try:
+            resp = self._client.get(
+                "/calendar/earnings",
+                params={
+                    "from": today.isoformat(),
+                    "to": (today + timedelta(days=horizon_days)).isoformat(),
+                    "symbol": ticker,
+                    "token": self._api_key,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.HTTPError as exc:
+            raise FinnhubError(
+                f"Fallo consultando earnings de {ticker}: {exc}"
+            ) from exc
+
+        out: list[EarningsEvent] = []
+        for e in (data or {}).get("earningsCalendar", []):
+            raw_date = e.get("date")
+            if not raw_date:
+                continue
+            # Guardamos bajo el ticker consultado: Finnhub a veces devuelve el
+            # símbolo local (2330.TW por TSM, GOOGL por GOOG) pero es la misma
+            # empresa, y así matchea con nuestros holdings.
+            out.append(
+                EarningsEvent(
+                    ticker=ticker,
+                    earnings_date=date.fromisoformat(raw_date),
+                    hour=e.get("hour") or "",
+                    eps_estimate=_num(e.get("epsEstimate")),
+                    eps_actual=_num(e.get("epsActual")),
+                    revenue_estimate=_num(e.get("revenueEstimate")),
+                    revenue_actual=_num(e.get("revenueActual")),
+                )
+            )
+        return out
+
+    def close(self) -> None:
+        self._client.close()
+
+    def __enter__(self) -> FinnhubEarningsProvider:
         return self
 
     def __exit__(self, *_exc: object) -> None:
