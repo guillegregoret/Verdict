@@ -18,6 +18,7 @@ from .data.finnhub import (
 )
 from .db.engine import get_engine
 from .db.repositories import TickerConfigRepository
+from .digests import WeeklyDigestRunner
 from .earnings import EarningsService
 from .fundamentals import (
     FundamentalsMonitor,
@@ -77,6 +78,13 @@ def main() -> None:
             earnings_provider, engine, horizon_days=settings.earnings_horizon_days
         )
 
+        # Avisos semanales (§5): lunes earnings + viernes resumen del portfolio.
+        weekly_digest = (
+            WeeklyDigestRunner.from_engine(engine, notifier, settings)
+            if settings.weekly_digests_enabled
+            else None
+        )
+
         pipeline = AlertPipeline.from_engine(
             engine,
             reasoning,
@@ -93,6 +101,7 @@ def main() -> None:
             holdings_sync=holdings_sync,
             fundamentals_refresh=fundamentals_refresh,
             earnings_refresh=earnings_refresh,
+            weekly_digest=weekly_digest,
         ).run_forever()
 
 

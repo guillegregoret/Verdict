@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     earnings_refresh_every_ticks: int = 1440  # refresca el calendario cada N ticks (0=off)
     earnings_horizon_days: int = 120          # días hacia adelante a traer
 
+    # ── Digests semanales (§5) — hora de mercado (New York) ───────────────────
+    weekly_digests_enabled: bool = True
+    digest_monday_hour_et: int = 8   # lunes: earnings de la semana ~08:00 ET (pre-apertura)
+    digest_friday_hour_et: int = 16  # viernes: resumen del portfolio ~16:00 ET (cierre)
+
     # ── Anthropic (razonamiento) ─────────────────────────────────────────────
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-opus-4-8"

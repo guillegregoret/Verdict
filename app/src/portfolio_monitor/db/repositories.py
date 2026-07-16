@@ -237,6 +237,15 @@ class HoldingsRepository:
                 for r in conn.execute(text("SELECT ticker, verdict FROM holdings"))
             }
 
+    def shares_by_ticker(self) -> dict[str, float]:
+        """Mapa {ticker: shares totales} (suma entre cuentas) para el resumen semanal."""
+        stmt = text(
+            "SELECT ticker, sum(shares) AS shares FROM holdings "
+            "WHERE shares IS NOT NULL GROUP BY ticker"
+        )
+        with self._engine.connect() as conn:
+            return {r.ticker: float(r.shares) for r in conn.execute(stmt)}
+
 
 @dataclass(frozen=True)
 class LastAlert:
@@ -522,6 +531,28 @@ class EarningsRepository:
             )
             for r in rows
         ]
+
+
+class DigestLogRepository:
+    """Dedupe de los avisos semanales: 1 por (kind, fecha) — §5."""
+
+    def __init__(self, engine: Engine) -> None:
+        self._engine = engine
+
+    def was_sent(self, kind: str, day: date) -> bool:
+        stmt = text(
+            "SELECT 1 FROM digest_log WHERE kind = :k AND sent_on = :d LIMIT 1"
+        )
+        with self._engine.connect() as conn:
+            return conn.execute(stmt, {"k": kind, "d": day}).one_or_none() is not None
+
+    def mark_sent(self, kind: str, day: date) -> None:
+        stmt = text(
+            "INSERT INTO digest_log (kind, sent_on) VALUES (:k, :d) "
+            "ON CONFLICT (kind, sent_on) DO NOTHING"
+        )
+        with self._engine.begin() as conn:
+            conn.execute(stmt, {"k": kind, "d": day})
 
 
 class DataSourceHealthRepository:

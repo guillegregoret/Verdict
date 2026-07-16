@@ -32,6 +32,10 @@ class PeriodicTask(Protocol):
     def run_once(self) -> int: ...
 
 
+class WeeklyDigestLike(Protocol):
+    def run(self) -> None: ...
+
+
 class Scheduler:
     """Orquesta poller + pipeline en un loop periódico."""
 
@@ -44,6 +48,7 @@ class Scheduler:
         holdings_sync: PeriodicTask | None = None,
         fundamentals_refresh: PeriodicTask | None = None,
         earnings_refresh: PeriodicTask | None = None,
+        weekly_digest: WeeklyDigestLike | None = None,
     ) -> None:
         self._settings = settings
         self._poller = poller
@@ -52,6 +57,7 @@ class Scheduler:
         self._holdings_sync = holdings_sync
         self._fundamentals_refresh = fundamentals_refresh
         self._earnings_refresh = earnings_refresh
+        self._weekly_digest = weekly_digest
         self._ticks = 0
 
     def tick(self) -> None:
@@ -74,7 +80,17 @@ class Scheduler:
         )
         self._poller.poll_once()
         self._pipeline.run_once()
+        self._maybe_digest()
         self._ticks += 1
+
+    def _maybe_digest(self) -> None:
+        """Avisos semanales (lunes/viernes). El runner decide si toca y deduplica."""
+        if self._weekly_digest is None:
+            return
+        try:
+            self._weekly_digest.run()
+        except Exception:  # noqa: BLE001 - un digest no debe abortar el tick
+            logger.exception("Weekly digest falló (se continúa con el tick).")
 
     def _maybe_run(self, task: PeriodicTask | None, every: int, label: str) -> None:
         """Corre `task` 1 cada N ticks (config). Aislado: nunca tumba el tick."""
