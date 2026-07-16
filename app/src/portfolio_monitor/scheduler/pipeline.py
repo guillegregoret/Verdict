@@ -157,15 +157,20 @@ class AlertPipeline:
         pct_change: float,
         window_minutes: int,
     ) -> bool:
-        """Razona → notifica → registra. Devuelve True si se envió y registró."""
+        """Razona → notifica → registra. Devuelve True si se envió y registró.
+
+        Antepone `[TICKER]` al mensaje (el texto del reasoner no siempre nombra el
+        activo al principio) para que se lea de un vistazo de qué stock se trata.
+        """
         try:
             suggestion = self._reasoning.suggest(context)
         except ReasoningError as exc:
             logger.warning("Reasoning falló para %s: %s", context.ticker, exc)
             return False
 
+        message = f"[{context.ticker}] {suggestion.text}"
         try:
-            self._notifier.send(suggestion.text)
+            self._notifier.send(message)
         except NotifierError as exc:
             logger.warning("Notificación falló para %s: %s", context.ticker, exc)
             return False  # no registramos si no se envió (cooldown intacto)
@@ -176,6 +181,6 @@ class AlertPipeline:
             pct_change=pct_change,
             window_minutes=window_minutes,
             verdict=context.verdict,
-            suggestion=suggestion.text,
+            suggestion=message,
         )
         return True

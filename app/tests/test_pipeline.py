@@ -96,9 +96,16 @@ def test_run_once_sends_and_records() -> None:
     pipeline, notifier, alerts = _pipeline([_event("NVDA"), _event("GOOG")])
 
     assert pipeline.run_once() == 2
-    assert notifier.sent == ["sugerencia NVDA", "sugerencia GOOG"]
+    # cada mensaje arranca con [TICKER] para leer el contexto de un vistazo
+    assert notifier.sent == ["[NVDA] sugerencia NVDA", "[GOOG] sugerencia GOOG"]
     assert {r["ticker"] for r in alerts.records} == {"NVDA", "GOOG"}
-    assert alerts.records[0]["suggestion"] == "sugerencia NVDA"
+    assert alerts.records[0]["suggestion"] == "[NVDA] sugerencia NVDA"
+
+
+def test_message_is_prefixed_with_ticker() -> None:
+    pipeline, notifier, _ = _pipeline([_event("MSFT")])
+    pipeline.run_once()
+    assert notifier.sent[0].startswith("[MSFT] ")
 
 
 def test_run_once_no_events_is_noop() -> None:
@@ -152,7 +159,7 @@ def test_fundamentals_error_does_not_break_alert() -> None:
         alerts=FakeAlerts(),
     )
     assert pipeline.run_once() == 1
-    assert notifier.sent == ["sugerencia NVDA"]
+    assert notifier.sent == ["[NVDA] sugerencia NVDA"]
     assert reasoning.contexts[0].fundamentals is None
 
 
@@ -192,7 +199,7 @@ def test_fundamentals_decay_event_is_alerted() -> None:
         fundamentals_monitor=FakeDecayMonitor([_decay_event("NVDA")]),
     )
     assert pipeline.run_once() == 1
-    assert notifier.sent == ["sugerencia NVDA"]
+    assert notifier.sent == ["[NVDA] sugerencia NVDA"]
     assert reasoning.contexts[0].signal_kind == "fundamentals_decay"
     assert alerts.records[0]["trigger_type"] == "fundamentals_decay"
 
