@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS holdings (
 -- ── Config de triggers por ticker ────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS ticker_config (
   ticker          TEXT PRIMARY KEY,
-  threshold_pct   NUMERIC DEFAULT -4.5,
+  threshold_pct   NUMERIC DEFAULT -2.7,
   window_minutes  INT DEFAULT 390,  -- ~1 rueda US
   enabled         BOOLEAN DEFAULT true
 );

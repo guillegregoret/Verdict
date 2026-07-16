@@ -7,4 +7,4 @@
 -- Así cada dirección se ajusta por separado y por ticker.
 -- ─────────────────────────────────────────────────────────────────────────────
 ALTER TABLE ticker_config
-    ADD COLUMN IF NOT EXISTS rise_threshold_pct NUMERIC NOT NULL DEFAULT 8.0;
+    ADD COLUMN IF NOT EXISTS rise_threshold_pct NUMERIC NOT NULL DEFAULT 4.0;

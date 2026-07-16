@@ -61,7 +61,7 @@ WHERE a.ibkr_id = 'U26716079'
 ON CONFLICT (account_id, ticker) DO NOTHING;
 
 -- ── Config de triggers por ticker ────────────────────────────────────────────
--- Defaults §5: threshold -4.5%, ventana ~1 rueda (390 min).
+-- Defaults §5: caída -2.7% / suba +4%, ventana ~1 rueda (390 min).
 -- Europeos (defensa) = fase 2 → enabled=false hasta activar cobertura EUR.
 INSERT INTO ticker_config (ticker, enabled) VALUES
   ('NVDA', true), ('AVGO', true), ('ASML', true), ('ANET', true),

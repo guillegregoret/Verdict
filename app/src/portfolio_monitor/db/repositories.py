@@ -38,9 +38,9 @@ class TickerConfig:
     """Config de trigger de un ticker (umbrales + ventana)."""
 
     ticker: str
-    threshold_pct: float            # umbral de CAÍDA (negativo, ej: -4.5)
+    threshold_pct: float            # umbral de CAÍDA (negativo, ej: -2.7)
     window_minutes: int
-    rise_threshold_pct: float = 8.0  # umbral de SUBA (positivo, ej: +8.0)
+    rise_threshold_pct: float = 4.0  # umbral de SUBA (positivo, ej: +4.0)
 
 
 class TickerConfigRepository:
