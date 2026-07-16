@@ -40,6 +40,7 @@ VIEWS = [
     "v_drop_vs_window",
     "v_alerts_recent",
     "v_source_health_latest",
+    "v_upcoming_earnings",
 ]
 
 _opener = urllib.request.build_opener(
@@ -234,6 +235,15 @@ def charts_wanted(ds: dict[str, int]) -> list[tuple[str, str, int, dict]]:
             "order_by_cols": [],
             "adhoc_filters": [],
             "row_limit": 50,
+        }),
+        ("Próximos earnings", "table", ds["v_upcoming_earnings"], {
+            "viz_type": "table",
+            "query_mode": "raw",
+            "all_columns": ["ticker", "verdict", "earnings_date", "hour",
+                            "eps_estimate", "dias_faltantes"],
+            "order_by_cols": [],
+            "adhoc_filters": [],
+            "row_limit": 40,
         }),
     ]
 

@@ -169,6 +169,10 @@ CARDS = [
     ("Salud de fuentes de datos", "table",
      "SELECT source, ts, status, latency_ms FROM v_source_health_latest",
      {}, 24, 4),
+    ("Próximos earnings", "table",
+     "SELECT ticker, verdict, earnings_date, hour, eps_estimate, dias_faltantes "
+     "FROM v_upcoming_earnings LIMIT 40",
+     {}, 24, 6),
 ]
 
 
