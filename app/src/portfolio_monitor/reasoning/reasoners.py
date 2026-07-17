@@ -32,7 +32,7 @@ _ACTION_LABELS = {
     "comprar_dip": "evaluar SUMAR en la caída",
     "tomar_ganancias": "evaluar TOMAR GANANCIAS (reducir la posición)",
     "consolidar": "evaluar CONSOLIDAR / rotar la posición",
-    "revisar_tesis": "REVISAR LA TESIS (fundamentals deteriorados)",
+    "revisar_tesis": "REVISAR la tesis",
 }
 
 
@@ -82,6 +82,7 @@ def _action_label(context: ReasoningContext) -> str:
 _SIGNAL_HEADERS = {
     "fundamentals_decay": "DETERIORO de fundamentals (la tesis podría estar rompiéndose).",
     "rating_shift": "CAMBIO en el consenso de analistas.",
+    "post_earnings": "REPORTÓ earnings (reacción del mercado).",
 }
 
 
@@ -114,14 +115,14 @@ class TemplateReasoner:
 
     def generate(self, context: ReasoningContext) -> Suggestion:
         if context.signal_kind in _SIGNAL_HEADERS:
-            que = (
-                "fundamentals deteriorados"
-                if context.signal_kind == "fundamentals_decay"
-                else "cambio de rating"
-            )
+            label = {
+                "fundamentals_decay": ("⚠️", "fundamentals deteriorados"),
+                "rating_shift": ("⚠️", "cambio de rating"),
+                "post_earnings": ("📊", "reporte de earnings"),
+            }[context.signal_kind]
             text = (
-                f"⚠️ {context.ticker} ({context.verdict}): {que} — {context.note}. "
-                "Revisá la tesis."
+                f"{label[0]} {context.ticker} ({context.verdict}): {label[1]} — "
+                f"{context.note}. Revisá la tesis."
             )
             return Suggestion(text=text, source="template")
 

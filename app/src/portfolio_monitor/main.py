@@ -22,7 +22,7 @@ from .db.engine import get_engine
 from .db.repositories import TickerConfigRepository
 from .dca import DcaSizer
 from .digests import WeeklyDigestRunner
-from .earnings import EarningsService
+from .earnings import EarningsService, PostEarningsMonitor
 from .fundamentals import (
     FundamentalsMonitor,
     FundamentalsRefreshService,
@@ -79,6 +79,7 @@ def main() -> None:
         monitors = [
             FundamentalsMonitor.from_engine(engine, settings),
             RatingsMonitor.from_engine(engine, settings),
+            PostEarningsMonitor.from_engine(engine, settings),
         ]
 
         # Calendario de earnings (§5 informativo): mismo Finnhub, refresh diario.

@@ -5,6 +5,7 @@ persiste. Alimenta el aviso de los lunes (earnings de la semana) y la card de
 los dashboards.
 """
 
+from .monitor import PostEarningsEvent, PostEarningsMonitor
 from .service import EarningsService
 
-__all__ = ["EarningsService"]
+__all__ = ["EarningsService", "PostEarningsEvent", "PostEarningsMonitor"]

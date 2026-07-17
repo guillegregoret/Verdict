@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     ratings_shift_threshold: float = 0.3       # cambio de score (escala 1-5) que dispara
     ratings_cooldown_days: int = 30            # 1 aviso de cambio por ticker / N días
 
+    # ── Reacción post-earnings (§5) ───────────────────────────────────────────
+    postearnings_lookback_days: int = 5   # avisa por reportes de los últimos N días
+    postearnings_cooldown_days: int = 20  # 1 aviso por ticker / N días (no repetir)
+
     # ── Digests semanales (§5) — hora de mercado (New York) ───────────────────
     weekly_digests_enabled: bool = True
     digest_monday_hour_et: int = 8   # lunes: earnings de la semana ~08:00 ET (pre-apertura)

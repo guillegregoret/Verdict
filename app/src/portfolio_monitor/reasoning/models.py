@@ -9,6 +9,7 @@ from ..db.repositories import FundamentalsRow
 from ..trigger import TriggerEvent
 
 if TYPE_CHECKING:
+    from ..earnings import PostEarningsEvent
     from ..fundamentals import FundamentalsEvent
     from ..ratings import RatingEvent
 
@@ -77,6 +78,17 @@ class ReasoningContext:
             ticker=event.ticker,
             verdict=event.verdict,
             signal_kind="rating_shift",
+            action="revisar_tesis",
+            note=event.note,
+        )
+
+    @classmethod
+    def from_postearnings_event(cls, event: PostEarningsEvent) -> ReasoningContext:
+        """Contexto de una señal de reacción post-earnings (§5)."""
+        return cls(
+            ticker=event.ticker,
+            verdict=event.verdict,
+            signal_kind="post_earnings",
             action="revisar_tesis",
             note=event.note,
         )

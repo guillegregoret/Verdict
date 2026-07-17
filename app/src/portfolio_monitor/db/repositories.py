@@ -474,6 +474,17 @@ class UpcomingEarnings:
     verdict: str | None
 
 
+@dataclass(frozen=True)
+class ReportedEarnings:
+    """Earnings ya reportado (con eps_actual) para la reacción post-earnings."""
+
+    ticker: str
+    earnings_date: date
+    eps_estimate: float | None
+    eps_actual: float | None
+    verdict: str | None
+
+
 class EarningsRepository:
     """Persistencia y lectura del calendario de earnings (§5 informativo)."""
 
@@ -536,6 +547,30 @@ class EarningsRepository:
                 earnings_date=r.earnings_date,
                 hour=r.hour or "",
                 eps_estimate=float(r.eps_estimate) if r.eps_estimate is not None else None,
+                verdict=r.verdict,
+            )
+            for r in rows
+        ]
+
+    def reported_since(self, start: date) -> list[ReportedEarnings]:
+        """Earnings con eps_actual desde `start` (para la reacción post-earnings)."""
+        stmt = text(
+            """
+            SELECT e.ticker, e.earnings_date, e.eps_estimate, e.eps_actual,
+                   (SELECT verdict FROM holdings WHERE ticker = e.ticker LIMIT 1) AS verdict
+            FROM earnings e
+            WHERE e.earnings_date >= :start AND e.eps_actual IS NOT NULL
+            ORDER BY e.earnings_date DESC
+            """
+        )
+        with self._engine.connect() as conn:
+            rows = conn.execute(stmt, {"start": start}).all()
+        return [
+            ReportedEarnings(
+                ticker=r.ticker,
+                earnings_date=r.earnings_date,
+                eps_estimate=float(r.eps_estimate) if r.eps_estimate is not None else None,
+                eps_actual=float(r.eps_actual) if r.eps_actual is not None else None,
                 verdict=r.verdict,
             )
             for r in rows
