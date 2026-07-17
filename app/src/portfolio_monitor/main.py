@@ -18,6 +18,7 @@ from .data.finnhub import (
 )
 from .db.engine import get_engine
 from .db.repositories import TickerConfigRepository
+from .dca import DcaSizer
 from .digests import WeeklyDigestRunner
 from .earnings import EarningsService
 from .fundamentals import (
@@ -85,12 +86,16 @@ def main() -> None:
             else None
         )
 
+        # DCA (§5.4): sizing sugerido en dips, capado al cash de la cuenta.
+        dca = DcaSizer.from_engine(engine, settings) if settings.dca_enabled else None
+
         pipeline = AlertPipeline.from_engine(
             engine,
             reasoning,
             notifier,
             fundamentals=fundamentals,
             fundamentals_monitor=fundamentals_monitor,
+            dca=dca,
         )
         holdings_sync = HoldingsSyncService.from_engine(settings, engine)
         Scheduler(

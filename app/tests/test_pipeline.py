@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from portfolio_monitor.config import Settings
 from portfolio_monitor.db.repositories import FundamentalsRow
+from portfolio_monitor.dca import DcaSuggestion
 from portfolio_monitor.fundamentals import FundamentalsEvent
 from portfolio_monitor.notifier import NotifierError
 from portfolio_monitor.reasoning import ReasoningContext, ReasoningError, Suggestion
@@ -169,6 +170,34 @@ class FakeDecayMonitor:
 
     def evaluate(self) -> list[FundamentalsEvent]:
         return list(self._events)
+
+
+class FakeDca:
+    def __init__(self, suggestion: DcaSuggestion | None) -> None:
+        self._suggestion = suggestion
+
+    def size(self, ticker: str, pct_change: float) -> DcaSuggestion | None:
+        return self._suggestion
+
+
+def test_dca_sizing_reaches_context() -> None:
+    reasoning = FakeReasoning()
+    sugg = DcaSuggestion(
+        ticker="NVDA", amount_usd=130.0, available_cash=500.0,
+        tranche_usd=100.0, multiplier=1.3,
+    )
+    pipeline = AlertPipeline(
+        trigger=FakeTrigger([_event("NVDA")]),
+        fundamentals=FakeFundamentals(),
+        reasoning=reasoning,
+        notifier=FakeNotifier(),
+        alerts=FakeAlerts(),
+        dca=FakeDca(sugg),
+    )
+    assert pipeline.run_once() == 1
+    ctx = reasoning.contexts[0]
+    assert ctx.dca_suggested_usd == 130.0
+    assert ctx.bucket_remaining == 500.0
 
 
 def _decay_event(ticker: str = "NVDA") -> FundamentalsEvent:

@@ -71,6 +71,12 @@ class Settings(BaseSettings):
     digest_monday_hour_et: int = 8   # lunes: earnings de la semana ~08:00 ET (pre-apertura)
     digest_friday_hour_et: int = 16  # viernes: resumen del portfolio ~16:00 ET (cierre)
 
+    # ── DCA (§5.4) — sizing sugerido en dips, capado al cash de la cuenta ──────
+    dca_enabled: bool = True
+    dca_default_tranche_usd: float = 100.0  # monto base si el ticker no tiene plan propio
+    dca_max_multiplier: float = 2.0         # tope del factor por profundidad del dip
+    dca_dip_slope: float = 0.1              # +multiplicador por cada 1% de caída
+
     # ── Anthropic (razonamiento) ─────────────────────────────────────────────
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-opus-4-8"

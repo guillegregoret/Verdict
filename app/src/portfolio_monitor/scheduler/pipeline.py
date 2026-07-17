@@ -19,6 +19,7 @@ from ..db.repositories import (
     FundamentalsRepository,
     FundamentalsRow,
 )
+from ..dca import DcaSuggestion
 from ..fundamentals import FundamentalsEvent
 from ..logging import get_logger
 from ..notifier import NotifierError
@@ -35,6 +36,10 @@ class TriggerSource(Protocol):
 
 class DecaySource(Protocol):
     def evaluate(self) -> list[FundamentalsEvent]: ...
+
+
+class DcaSizerLike(Protocol):
+    def size(self, ticker: str, pct_change: float) -> DcaSuggestion | None: ...
 
 
 class FundamentalsReader(Protocol):
@@ -73,6 +78,7 @@ class AlertPipeline:
         notifier: MessageSender,
         alerts: AlertSink,
         fundamentals_monitor: DecaySource | None = None,
+        dca: DcaSizerLike | None = None,
     ) -> None:
         self._trigger = trigger
         self._fundamentals = fundamentals
@@ -80,6 +86,7 @@ class AlertPipeline:
         self._notifier = notifier
         self._alerts = alerts
         self._fundamentals_monitor = fundamentals_monitor
+        self._dca = dca
 
     @classmethod
     def from_engine(
@@ -89,12 +96,13 @@ class AlertPipeline:
         notifier: MessageSender,
         fundamentals: FundamentalsReader | None = None,
         fundamentals_monitor: DecaySource | None = None,
+        dca: DcaSizerLike | None = None,
     ) -> AlertPipeline:
         """Cablea los repos y el trigger engine sobre `engine`.
 
         `fundamentals`: reader de fundamentals (None → repo read-only). `main.py`
-        inyecta el FundamentalsService (fetch on-trigger) y el FundamentalsMonitor
-        (deterioro, §5.3).
+        inyecta el FundamentalsService (fetch on-trigger), el FundamentalsMonitor
+        (deterioro, §5.3) y el DcaSizer (§5.4).
         """
         return cls(
             trigger=TriggerEngine.from_engine(engine),
@@ -103,6 +111,7 @@ class AlertPipeline:
             notifier=notifier,
             alerts=AlertRepository(engine),
             fundamentals_monitor=fundamentals_monitor,
+            dca=dca,
         )
 
     def run_once(self) -> int:
@@ -111,8 +120,16 @@ class AlertPipeline:
 
         price_events = self._trigger.evaluate()
         for event in price_events:
+            dca = (
+                self._dca.size(event.ticker, event.pct_change)
+                if self._dca is not None and event.action == "comprar_dip"
+                else None
+            )
             context = ReasoningContext.from_trigger_event(
-                event, fundamentals=self._safe_latest(event.ticker)
+                event,
+                fundamentals=self._safe_latest(event.ticker),
+                bucket_remaining=dca.available_cash if dca else None,
+                dca_suggested_usd=dca.amount_usd if dca else None,
             )
             if self._dispatch(
                 context,

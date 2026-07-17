@@ -22,8 +22,9 @@ _SYSTEM_PROMPT = (
     "ejecute manualmente en su broker. La señal puede ser: sumar en una caída, "
     "tomar ganancias / consolidar en una suba, o un DETERIORO de fundamentals "
     "(la tesis se estaría rompiendo → revisar/reducir). Respondé en español "
-    "rioplatense, en 2 a 4 oraciones, concreto y accionable. No inventes datos "
-    "que no estén en el contexto; si faltan fundamentals, decilo."
+    "rioplatense, en 2 a 4 oraciones, concreto y accionable. Si el contexto trae "
+    "un DCA sugerido, mencioná el monto y que está topeado al cash disponible. "
+    "No inventes datos que no estén en el contexto; si faltan fundamentals, decilo."
 )
 
 # Etiqueta legible de la acción a evaluar (deriva del veredicto / la señal).
@@ -60,6 +61,20 @@ def _format_fundamentals(context: ReasoningContext) -> str:
     return "Fundamentals: " + (", ".join(parts) if parts else "sin métricas.")
 
 
+def _format_dca(context: ReasoningContext) -> str:
+    """Línea de DCA/cash (§5.4), o vacío si no aplica."""
+    if context.dca_suggested_usd is not None:
+        cash = (
+            f" (cash disponible ${context.bucket_remaining:.0f})"
+            if context.bucket_remaining is not None
+            else ""
+        )
+        return f"DCA sugerido: comprar ~${context.dca_suggested_usd:.0f}{cash}"
+    if context.bucket_remaining is not None:
+        return f"Cash disponible: ${context.bucket_remaining:.0f}"
+    return ""
+
+
 def _action_label(context: ReasoningContext) -> str:
     return _ACTION_LABELS.get(context.action, context.action)
 
@@ -84,9 +99,8 @@ def _build_context_block(context: ReasoningContext) -> str:
         f"Acción a evaluar: {_action_label(context)}",
         _format_fundamentals(context),
     ]
-    if context.bucket_remaining is not None:
-        lines.append(f"Bucket de compra restante: {context.bucket_remaining:.2f}")
-    return "\n".join(lines)
+    lines.append(_format_dca(context))
+    return "\n".join(line for line in lines if line)
 
 
 class TemplateReasoner:
@@ -107,8 +121,9 @@ class TemplateReasoner:
             f"Acción: {_action_label(context)}."
         )
         body = _format_fundamentals(context)
-        if context.bucket_remaining is not None:
-            body += f" Bucket restante: {context.bucket_remaining:.2f}."
+        dca = _format_dca(context)
+        if dca:
+            body += f" {dca}."
         return Suggestion(text=f"{header} {body}", source="template")
 
 

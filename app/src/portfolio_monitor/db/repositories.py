@@ -246,6 +246,15 @@ class HoldingsRepository:
         with self._engine.connect() as conn:
             return {r.ticker: float(r.shares) for r in conn.execute(stmt)}
 
+    def account_by_ticker(self) -> dict[str, str]:
+        """Mapa {ticker: ibkr_id} — qué cuenta tiene cada ticker (para el DCA, §5.4)."""
+        stmt = text(
+            "SELECT h.ticker, a.ibkr_id FROM holdings h "
+            "JOIN accounts a ON a.id = h.account_id WHERE a.ibkr_id IS NOT NULL"
+        )
+        with self._engine.connect() as conn:
+            return {r.ticker: r.ibkr_id for r in conn.execute(stmt)}
+
 
 @dataclass(frozen=True)
 class LastAlert:
@@ -590,6 +599,36 @@ class CashRepository:
         )
         with self._engine.connect() as conn:
             return {r.ibkr_id: float(r.available_funds) for r in conn.execute(stmt)}
+
+
+@dataclass(frozen=True)
+class DcaPlan:
+    """Override de DCA de un ticker (§5.4)."""
+
+    ticker: str
+    tranche_usd: float
+    max_multiplier: float
+
+
+class DcaPlanRepository:
+    """Lectura de los planes de DCA por ticker (§5.4)."""
+
+    def __init__(self, engine: Engine) -> None:
+        self._engine = engine
+
+    def plans_by_ticker(self) -> dict[str, DcaPlan]:
+        stmt = text(
+            "SELECT ticker, tranche_usd, max_multiplier FROM dca_plan WHERE enabled"
+        )
+        with self._engine.connect() as conn:
+            return {
+                r.ticker: DcaPlan(
+                    ticker=r.ticker,
+                    tranche_usd=float(r.tranche_usd),
+                    max_multiplier=float(r.max_multiplier),
+                )
+                for r in conn.execute(stmt)
+            }
 
 
 class DigestLogRepository:

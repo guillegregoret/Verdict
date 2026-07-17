@@ -76,12 +76,23 @@ def test_template_includes_key_fields() -> None:
     assert "NVDA" in s.text
     assert "Mantener" in s.text
     assert "P/E 30.5" in s.text
-    assert "Bucket restante: 500.00" in s.text
+    assert "Cash disponible: $500" in s.text
 
 
 def test_template_handles_missing_fundamentals() -> None:
     s = TemplateReasoner().generate(_context(fundamentals=None))
     assert "no disponibles" in s.text
+
+
+def test_template_includes_dca_suggestion() -> None:
+    ctx = ReasoningContext(
+        ticker="NVDA", verdict="Mantener", pct_change=-3.0, window_minutes=390,
+        current_price=97.0, reference_price=100.0, action="comprar_dip",
+        dca_suggested_usd=130.0, bucket_remaining=500.0,
+    )
+    s = TemplateReasoner().generate(ctx)
+    assert "DCA sugerido" in s.text
+    assert "130" in s.text
 
 
 def test_template_frames_take_profit_on_rise() -> None:

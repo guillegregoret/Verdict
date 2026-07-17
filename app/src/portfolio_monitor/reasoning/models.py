@@ -31,7 +31,8 @@ class ReasoningContext:
     reference_price: float = 0.0
     note: str | None = None           # qué se deterioró (para fundamentals_decay)
     fundamentals: FundamentalsRow | None = None
-    bucket_remaining: float | None = None
+    bucket_remaining: float | None = None   # cash disponible en la cuenta (§5.4)
+    dca_suggested_usd: float | None = None  # monto de DCA sugerido en el dip (§5.4)
 
     @classmethod
     def from_trigger_event(
@@ -39,6 +40,7 @@ class ReasoningContext:
         event: TriggerEvent,
         fundamentals: FundamentalsRow | None = None,
         bucket_remaining: float | None = None,
+        dca_suggested_usd: float | None = None,
     ) -> ReasoningContext:
         """Contexto de una señal de precio a partir de un TriggerEvent (§11.4)."""
         return cls(
@@ -52,6 +54,7 @@ class ReasoningContext:
             reference_price=event.reference_price,
             fundamentals=fundamentals,
             bucket_remaining=bucket_remaining,
+            dca_suggested_usd=dca_suggested_usd,
         )
 
     @classmethod
