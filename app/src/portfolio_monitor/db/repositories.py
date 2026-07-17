@@ -551,6 +551,17 @@ class AccountCashLike(Protocol):
     currency: str
 
 
+@dataclass(frozen=True)
+class AccountCashRow:
+    """Cash leído de una cuenta (con nombre) para el bot /cash."""
+
+    ibkr_id: str
+    name: str
+    total_cash: float
+    available_funds: float
+    currency: str
+
+
 class CashRepository:
     """Snapshots de cash por cuenta + lectura del último (para el DCA, §5.4)."""
 
@@ -599,6 +610,26 @@ class CashRepository:
         )
         with self._engine.connect() as conn:
             return {r.ibkr_id: float(r.available_funds) for r in conn.execute(stmt)}
+
+    def latest(self) -> list[AccountCashRow]:
+        """Último cash por cuenta con nombre (para el bot /cash)."""
+        stmt = text(
+            "SELECT ibkr_id, name, total_cash, available_funds, currency "
+            "FROM v_account_cash_latest ORDER BY name"
+        )
+        with self._engine.connect() as conn:
+            return [
+                AccountCashRow(
+                    ibkr_id=r.ibkr_id,
+                    name=r.name,
+                    total_cash=float(r.total_cash) if r.total_cash is not None else 0.0,
+                    available_funds=(
+                        float(r.available_funds) if r.available_funds is not None else 0.0
+                    ),
+                    currency=r.currency or "USD",
+                )
+                for r in conn.execute(stmt)
+            ]
 
 
 @dataclass(frozen=True)

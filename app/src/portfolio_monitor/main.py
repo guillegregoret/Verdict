@@ -8,6 +8,7 @@ y siguen sin tumbar el loop.
 
 from __future__ import annotations
 
+import threading
 from contextlib import ExitStack
 
 from .config import Settings, get_settings
@@ -33,6 +34,7 @@ from .notifier import TelegramNotifier
 from .poller import PricePoller
 from .reasoning import AnthropicReasoner, ReasoningService, TemplateReasoner
 from .scheduler import AlertPipeline, Scheduler
+from .telegram_bot import CommandRouter, TelegramBot
 
 logger = get_logger(__name__)
 
@@ -88,6 +90,13 @@ def main() -> None:
 
         # DCA (§5.4): sizing sugerido en dips, capado al cash de la cuenta.
         dca = DcaSizer.from_engine(engine, settings) if settings.dca_enabled else None
+
+        # Bot interactivo /status (§5): thread daemon, long-polling, read-only.
+        if settings.telegram_bot_enabled and settings.telegram_bot_token:
+            bot = TelegramBot(settings, CommandRouter.from_engine(engine))
+            threading.Thread(
+                target=bot.run_forever, name="telegram-bot", daemon=True
+            ).start()
 
         pipeline = AlertPipeline.from_engine(
             engine,

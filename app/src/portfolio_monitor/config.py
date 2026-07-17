@@ -85,6 +85,10 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
     telegram_base_url: str = "https://api.telegram.org"
+    # Bot interactivo /status (§5). 🔴 FAIL-CLOSED: sin ids acá, el bot no
+    # responde datos a nadie (solo /whoami). CSV de tu user id personal.
+    telegram_bot_enabled: bool = True
+    telegram_allowed_user_ids: str = ""
 
     # ── Monitoreo (§9) ───────────────────────────────────────────────────────
     # Dead-man's switch: la app pinga esta URL cada tick. Si deja de pingar → aviso.
