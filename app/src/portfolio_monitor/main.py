@@ -16,6 +16,7 @@ from .data.finnhub import (
     FinnhubClient,
     FinnhubEarningsProvider,
     FinnhubFundamentalsProvider,
+    FinnhubRatingsProvider,
 )
 from .db.engine import get_engine
 from .db.repositories import TickerConfigRepository
@@ -32,6 +33,7 @@ from .logging import get_logger, setup_logging
 from .monitoring import HealthcheckPinger
 from .notifier import TelegramNotifier
 from .poller import PricePoller
+from .ratings import RatingsMonitor, RatingsService
 from .reasoning import AnthropicReasoner, ReasoningService, TemplateReasoner
 from .scheduler import AlertPipeline, Scheduler
 from .telegram_bot import CommandRouter, TelegramBot
@@ -73,13 +75,20 @@ def main() -> None:
         fundamentals_refresh = FundamentalsRefreshService(
             fundamentals, TickerConfigRepository(engine)
         )
-        fundamentals_monitor = FundamentalsMonitor.from_engine(engine, settings)
+        # Monitores (§5): cada uno emite señales con su propio cooldown.
+        monitors = [
+            FundamentalsMonitor.from_engine(engine, settings),
+            RatingsMonitor.from_engine(engine, settings),
+        ]
 
         # Calendario de earnings (§5 informativo): mismo Finnhub, refresh diario.
         earnings_provider = stack.enter_context(FinnhubEarningsProvider(settings))
         earnings_refresh = EarningsService.from_engine(
             earnings_provider, engine, horizon_days=settings.earnings_horizon_days
         )
+        # Ratings de analistas (§5): refresh diario del consenso.
+        ratings_provider = stack.enter_context(FinnhubRatingsProvider(settings))
+        ratings_refresh = RatingsService.from_engine(ratings_provider, engine)
 
         # Avisos semanales (§5): lunes earnings + viernes resumen del portfolio.
         weekly_digest = (
@@ -103,7 +112,7 @@ def main() -> None:
             reasoning,
             notifier,
             fundamentals=fundamentals,
-            fundamentals_monitor=fundamentals_monitor,
+            monitors=monitors,
             dca=dca,
         )
         holdings_sync = HoldingsSyncService.from_engine(settings, engine)
@@ -115,6 +124,7 @@ def main() -> None:
             holdings_sync=holdings_sync,
             fundamentals_refresh=fundamentals_refresh,
             earnings_refresh=earnings_refresh,
+            ratings_refresh=ratings_refresh,
             weekly_digest=weekly_digest,
         ).run_forever()
 

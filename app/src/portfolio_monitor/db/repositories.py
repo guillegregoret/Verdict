@@ -542,6 +542,104 @@ class EarningsRepository:
         ]
 
 
+class RatingSnapshotLike(Protocol):
+    """Forma estructural de un snapshot de ratings (evita acoplar db → data)."""
+
+    ticker: str
+    period: date
+    strong_buy: int
+    buy: int
+    hold: int
+    sell: int
+    strong_sell: int
+
+
+@dataclass(frozen=True)
+class RatingRow:
+    """Snapshot de consenso de analistas leído de la DB."""
+
+    ticker: str
+    period: date
+    strong_buy: int
+    buy: int
+    hold: int
+    sell: int
+    strong_sell: int
+
+
+class RatingsRepository:
+    """Persistencia y lectura del consenso de analistas (§5)."""
+
+    def __init__(self, engine: Engine) -> None:
+        self._engine = engine
+
+    def upsert_many(self, snapshots: Sequence[RatingSnapshotLike]) -> int:
+        """Upsert por (ticker, period). Devuelve cuántos se enviaron."""
+        if not snapshots:
+            return 0
+        stmt = text(
+            """
+            INSERT INTO analyst_ratings
+                (ticker, period, strong_buy, buy, hold, sell, strong_sell, updated_at)
+            VALUES
+                (:ticker, :period, :strong_buy, :buy, :hold, :sell, :strong_sell, now())
+            ON CONFLICT (ticker, period) DO UPDATE SET
+                strong_buy = EXCLUDED.strong_buy,
+                buy = EXCLUDED.buy,
+                hold = EXCLUDED.hold,
+                sell = EXCLUDED.sell,
+                strong_sell = EXCLUDED.strong_sell,
+                updated_at = now()
+            """
+        )
+        rows = [
+            {
+                "ticker": s.ticker,
+                "period": s.period,
+                "strong_buy": s.strong_buy,
+                "buy": s.buy,
+                "hold": s.hold,
+                "sell": s.sell,
+                "strong_sell": s.strong_sell,
+            }
+            for s in snapshots
+        ]
+        with self._engine.begin() as conn:
+            conn.execute(stmt, rows)
+        return len(rows)
+
+    def latest_and_baseline(
+        self, ticker: str, min_gap_days: int
+    ) -> tuple[RatingRow, RatingRow] | None:
+        """(último, baseline ≥ min_gap_days más viejo). None si falta historial."""
+        rows = self._recent(ticker)
+        if not rows:
+            return None
+        latest = rows[0]
+        cutoff = latest.period - timedelta(days=min_gap_days)
+        for row in rows[1:]:
+            if row.period <= cutoff:
+                return latest, row
+        return None
+
+    def _recent(self, ticker: str) -> list[RatingRow]:
+        stmt = text(
+            """
+            SELECT ticker, period, strong_buy, buy, hold, sell, strong_sell
+            FROM analyst_ratings WHERE ticker = :t ORDER BY period DESC LIMIT 12
+            """
+        )
+        with self._engine.connect() as conn:
+            return [
+                RatingRow(
+                    ticker=r.ticker, period=r.period,
+                    strong_buy=r.strong_buy or 0, buy=r.buy or 0, hold=r.hold or 0,
+                    sell=r.sell or 0, strong_sell=r.strong_sell or 0,
+                )
+                for r in conn.execute(stmt, {"t": ticker})
+            ]
+
+
 class AccountCashLike(Protocol):
     """Forma estructural del cash de una cuenta (evita acoplar db → data)."""
 

@@ -27,6 +27,7 @@ from ..db.repositories import (
     LastAlert,
 )
 from ..logging import get_logger
+from ..reasoning import MonitorSignal, ReasoningContext
 
 logger = get_logger(__name__)
 
@@ -85,6 +86,16 @@ class FundamentalsMonitor:
             alerts=AlertRepository(engine),
             settings=settings,
         )
+
+    def signals(self) -> list[MonitorSignal]:
+        """Deterioros como MonitorSignal listos para el pipeline (§5.3)."""
+        return [
+            MonitorSignal(
+                context=ReasoningContext.from_fundamentals_event(event),
+                trigger_type=event.trigger_type,
+            )
+            for event in self.evaluate()
+        ]
 
     def evaluate(self, now: datetime | None = None) -> list[FundamentalsEvent]:
         """Un ciclo. Devuelve los deterioros nuevos (fuera de cooldown)."""

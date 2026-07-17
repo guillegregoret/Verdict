@@ -232,3 +232,75 @@ class FinnhubEarningsProvider:
 
     def __exit__(self, *_exc: object) -> None:
         self.close()
+
+
+@dataclass(frozen=True)
+class RatingSnapshot:
+    """Consenso de analistas en un período (Finnhub /stock/recommendation)."""
+
+    ticker: str
+    period: date
+    strong_buy: int
+    buy: int
+    hold: int
+    sell: int
+    strong_sell: int
+
+
+def _int(value: Any) -> int:
+    n = _num(value)
+    return int(n) if n is not None else 0
+
+
+class FinnhubRatingsProvider:
+    """Recomendaciones de analistas sobre Finnhub `/stock/recommendation` (free)."""
+
+    def __init__(self, settings: Settings, client: httpx.Client | None = None) -> None:
+        if not settings.finnhub_api_key:
+            raise FinnhubError("FINNHUB_API_KEY no configurada.")
+        self._api_key = settings.finnhub_api_key
+        self._client = client or httpx.Client(
+            base_url=settings.finnhub_base_url,
+            timeout=httpx.Timeout(15.0),
+        )
+
+    def fetch(self, ticker: str) -> list[RatingSnapshot]:
+        """Snapshots de consenso de `ticker` (más reciente primero)."""
+        try:
+            resp = self._client.get(
+                "/stock/recommendation",
+                params={"symbol": ticker, "token": self._api_key},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.HTTPError as exc:
+            raise FinnhubError(
+                f"Fallo consultando ratings de {ticker}: {exc}"
+            ) from exc
+
+        out: list[RatingSnapshot] = []
+        for r in data or []:
+            raw_period = r.get("period")
+            if not raw_period:
+                continue
+            out.append(
+                RatingSnapshot(
+                    ticker=ticker,
+                    period=date.fromisoformat(raw_period),
+                    strong_buy=_int(r.get("strongBuy")),
+                    buy=_int(r.get("buy")),
+                    hold=_int(r.get("hold")),
+                    sell=_int(r.get("sell")),
+                    strong_sell=_int(r.get("strongSell")),
+                )
+            )
+        return out
+
+    def close(self) -> None:
+        self._client.close()
+
+    def __enter__(self) -> FinnhubRatingsProvider:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()

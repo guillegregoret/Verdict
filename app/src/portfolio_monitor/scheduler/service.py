@@ -48,6 +48,7 @@ class Scheduler:
         holdings_sync: PeriodicTask | None = None,
         fundamentals_refresh: PeriodicTask | None = None,
         earnings_refresh: PeriodicTask | None = None,
+        ratings_refresh: PeriodicTask | None = None,
         weekly_digest: WeeklyDigestLike | None = None,
     ) -> None:
         self._settings = settings
@@ -57,6 +58,7 @@ class Scheduler:
         self._holdings_sync = holdings_sync
         self._fundamentals_refresh = fundamentals_refresh
         self._earnings_refresh = earnings_refresh
+        self._ratings_refresh = ratings_refresh
         self._weekly_digest = weekly_digest
         self._ticks = 0
 
@@ -77,6 +79,11 @@ class Scheduler:
             self._earnings_refresh,
             self._settings.earnings_refresh_every_ticks,
             "Earnings refresh",
+        )
+        self._maybe_run(
+            self._ratings_refresh,
+            self._settings.ratings_refresh_every_ticks,
+            "Ratings refresh",
         )
         self._poller.poll_once()
         self._pipeline.run_once()

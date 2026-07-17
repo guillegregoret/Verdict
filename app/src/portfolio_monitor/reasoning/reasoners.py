@@ -79,14 +79,20 @@ def _action_label(context: ReasoningContext) -> str:
     return _ACTION_LABELS.get(context.action, context.action)
 
 
+_SIGNAL_HEADERS = {
+    "fundamentals_decay": "DETERIORO de fundamentals (la tesis podría estar rompiéndose).",
+    "rating_shift": "CAMBIO en el consenso de analistas.",
+}
+
+
 def _build_context_block(context: ReasoningContext) -> str:
     """Bloque de contexto que se le pasa al modelo (según el tipo de señal)."""
-    if context.signal_kind == "fundamentals_decay":
+    if context.signal_kind in _SIGNAL_HEADERS:
         return "\n".join([
             f"Ticker: {context.ticker}",
             f"Veredicto configurado: {context.verdict}",
-            "Señal: DETERIORO de fundamentals (la tesis podría estar rompiéndose).",
-            f"Qué empeoró: {context.note}",
+            f"Señal: {_SIGNAL_HEADERS[context.signal_kind]}",
+            f"Detalle: {context.note}",
             f"Acción a evaluar: {_action_label(context)}",
             _format_fundamentals(context),
         ])
@@ -107,10 +113,15 @@ class TemplateReasoner:
     """Sugerencia determinística sin llamar a ninguna API (fallback / MVP)."""
 
     def generate(self, context: ReasoningContext) -> Suggestion:
-        if context.signal_kind == "fundamentals_decay":
+        if context.signal_kind in _SIGNAL_HEADERS:
+            que = (
+                "fundamentals deteriorados"
+                if context.signal_kind == "fundamentals_decay"
+                else "cambio de rating"
+            )
             text = (
-                f"⚠️ {context.ticker} ({context.verdict}): fundamentals deteriorados "
-                f"— {context.note}. Revisá la tesis."
+                f"⚠️ {context.ticker} ({context.verdict}): {que} — {context.note}. "
+                "Revisá la tesis."
             )
             return Suggestion(text=text, source="template")
 

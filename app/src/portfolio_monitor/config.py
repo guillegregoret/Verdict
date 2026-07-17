@@ -66,6 +66,12 @@ class Settings(BaseSettings):
     earnings_refresh_every_ticks: int = 1440  # refresca el calendario cada N ticks (0=off)
     earnings_horizon_days: int = 120          # días hacia adelante a traer
 
+    # ── Ratings de analistas (§5) ─────────────────────────────────────────────
+    ratings_refresh_every_ticks: int = 1440   # refresca el consenso cada N ticks (0=off)
+    ratings_baseline_min_age_days: int = 30    # antigüedad mínima del baseline
+    ratings_shift_threshold: float = 0.3       # cambio de score (escala 1-5) que dispara
+    ratings_cooldown_days: int = 30            # 1 aviso de cambio por ticker / N días
+
     # ── Digests semanales (§5) — hora de mercado (New York) ───────────────────
     weekly_digests_enabled: bool = True
     digest_monday_hour_et: int = 8   # lunes: earnings de la semana ~08:00 ET (pre-apertura)

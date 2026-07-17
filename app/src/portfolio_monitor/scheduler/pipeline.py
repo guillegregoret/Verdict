@@ -1,8 +1,9 @@
 """AlertPipeline: encadena señales → fundamentals → reasoning → notifier (§2).
 
-Procesa dos fuentes de señal por ciclo:
+Procesa las fuentes de señal por ciclo:
 - Movimientos de precio (TriggerEngine): compra en dip / tomar ganancias / consolidar.
-- Deterioro de fundamentals (FundamentalsMonitor, §5.3): revisar la tesis.
+- Monitores (§5): deterioro de fundamentals, cambios de rating, post-earnings, …
+  Cada uno emite `MonitorSignal`s ya listos (contexto + tipo), con su propio cooldown.
 
 Por cada señal: arma el contexto, genera la sugerencia, la manda por Telegram y
 —solo si el envío fue exitoso— registra la alerta (activa el cooldown). Read-only.
@@ -10,6 +11,7 @@ Por cada señal: arma el contexto, genera la sugerencia, la manda por Telegram y
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Protocol
 
 from sqlalchemy import Engine
@@ -20,10 +22,15 @@ from ..db.repositories import (
     FundamentalsRow,
 )
 from ..dca import DcaSuggestion
-from ..fundamentals import FundamentalsEvent
 from ..logging import get_logger
 from ..notifier import NotifierError
-from ..reasoning import ReasoningContext, ReasoningError, ReasoningService, Suggestion
+from ..reasoning import (
+    MonitorSignal,
+    ReasoningContext,
+    ReasoningError,
+    ReasoningService,
+    Suggestion,
+)
 from ..trigger import TriggerEngine, TriggerEvent
 
 logger = get_logger(__name__)
@@ -34,8 +41,8 @@ class TriggerSource(Protocol):
     def evaluate(self) -> list[TriggerEvent]: ...
 
 
-class DecaySource(Protocol):
-    def evaluate(self) -> list[FundamentalsEvent]: ...
+class MonitorLike(Protocol):
+    def signals(self) -> list[MonitorSignal]: ...
 
 
 class DcaSizerLike(Protocol):
@@ -77,7 +84,7 @@ class AlertPipeline:
         reasoning: SuggestionMaker,
         notifier: MessageSender,
         alerts: AlertSink,
-        fundamentals_monitor: DecaySource | None = None,
+        monitors: Sequence[MonitorLike] = (),
         dca: DcaSizerLike | None = None,
     ) -> None:
         self._trigger = trigger
@@ -85,7 +92,7 @@ class AlertPipeline:
         self._reasoning = reasoning
         self._notifier = notifier
         self._alerts = alerts
-        self._fundamentals_monitor = fundamentals_monitor
+        self._monitors = tuple(monitors)
         self._dca = dca
 
     @classmethod
@@ -95,14 +102,14 @@ class AlertPipeline:
         reasoning: ReasoningService,
         notifier: MessageSender,
         fundamentals: FundamentalsReader | None = None,
-        fundamentals_monitor: DecaySource | None = None,
+        monitors: Sequence[MonitorLike] = (),
         dca: DcaSizerLike | None = None,
     ) -> AlertPipeline:
         """Cablea los repos y el trigger engine sobre `engine`.
 
         `fundamentals`: reader de fundamentals (None → repo read-only). `main.py`
-        inyecta el FundamentalsService (fetch on-trigger), el FundamentalsMonitor
-        (deterioro, §5.3) y el DcaSizer (§5.4).
+        inyecta el FundamentalsService (fetch on-trigger), los monitores (§5) y el
+        DcaSizer (§5.4).
         """
         return cls(
             trigger=TriggerEngine.from_engine(engine),
@@ -110,7 +117,7 @@ class AlertPipeline:
             reasoning=reasoning,
             notifier=notifier,
             alerts=AlertRepository(engine),
-            fundamentals_monitor=fundamentals_monitor,
+            monitors=monitors,
             dca=dca,
         )
 
@@ -139,19 +146,19 @@ class AlertPipeline:
             ):
                 sent += 1
 
-        decay_events = (
-            self._fundamentals_monitor.evaluate()
-            if self._fundamentals_monitor is not None
-            else []
-        )
-        for decay in decay_events:
-            context = ReasoningContext.from_fundamentals_event(decay)
+        monitor_signals: list[MonitorSignal] = []
+        for monitor in self._monitors:
+            monitor_signals.extend(monitor.signals())
+        for signal in monitor_signals:
             if self._dispatch(
-                context, trigger_type=decay.trigger_type, pct_change=0.0, window_minutes=0
+                signal.context,
+                trigger_type=signal.trigger_type,
+                pct_change=0.0,
+                window_minutes=0,
             ):
                 sent += 1
 
-        total = len(price_events) + len(decay_events)
+        total = len(price_events) + len(monitor_signals)
         if total:
             logger.info("Pipeline: %d/%d alertas enviadas.", sent, total)
         return sent

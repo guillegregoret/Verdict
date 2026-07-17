@@ -10,6 +10,7 @@ from ..trigger import TriggerEvent
 
 if TYPE_CHECKING:
     from ..fundamentals import FundamentalsEvent
+    from ..ratings import RatingEvent
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,17 @@ class ReasoningContext:
             fundamentals=event.current,
         )
 
+    @classmethod
+    def from_rating_event(cls, event: RatingEvent) -> ReasoningContext:
+        """Contexto de una señal de cambio de rating de analistas (§5)."""
+        return cls(
+            ticker=event.ticker,
+            verdict=event.verdict,
+            signal_kind="rating_shift",
+            action="revisar_tesis",
+            note=event.note,
+        )
+
 
 @dataclass(frozen=True)
 class Suggestion:
@@ -76,3 +88,11 @@ class Suggestion:
 
     text: str
     source: str
+
+
+@dataclass(frozen=True)
+class MonitorSignal:
+    """Señal lista para el pipeline: contexto + tipo (para auditoría/cooldown)."""
+
+    context: ReasoningContext
+    trigger_type: str

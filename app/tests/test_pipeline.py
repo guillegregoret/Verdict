@@ -9,7 +9,12 @@ from portfolio_monitor.db.repositories import FundamentalsRow
 from portfolio_monitor.dca import DcaSuggestion
 from portfolio_monitor.fundamentals import FundamentalsEvent
 from portfolio_monitor.notifier import NotifierError
-from portfolio_monitor.reasoning import ReasoningContext, ReasoningError, Suggestion
+from portfolio_monitor.reasoning import (
+    MonitorSignal,
+    ReasoningContext,
+    ReasoningError,
+    Suggestion,
+)
 from portfolio_monitor.scheduler import AlertPipeline, Scheduler
 from portfolio_monitor.trigger import TriggerEvent
 
@@ -168,8 +173,11 @@ class FakeDecayMonitor:
     def __init__(self, events: list[FundamentalsEvent]) -> None:
         self._events = events
 
-    def evaluate(self) -> list[FundamentalsEvent]:
-        return list(self._events)
+    def signals(self) -> list[MonitorSignal]:
+        return [
+            MonitorSignal(ReasoningContext.from_fundamentals_event(e), e.trigger_type)
+            for e in self._events
+        ]
 
 
 class FakeDca:
@@ -225,7 +233,7 @@ def test_fundamentals_decay_event_is_alerted() -> None:
         reasoning=reasoning,
         notifier=notifier,
         alerts=alerts,
-        fundamentals_monitor=FakeDecayMonitor([_decay_event("NVDA")]),
+        monitors=[FakeDecayMonitor([_decay_event("NVDA")])],
     )
     assert pipeline.run_once() == 1
     assert notifier.sent == ["[NVDA] sugerencia NVDA"]
