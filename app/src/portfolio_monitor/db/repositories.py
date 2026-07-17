@@ -533,6 +533,65 @@ class EarningsRepository:
         ]
 
 
+class AccountCashLike(Protocol):
+    """Forma estructural del cash de una cuenta (evita acoplar db → data)."""
+
+    account: str
+    total_cash: float
+    available_funds: float
+    currency: str
+
+
+class CashRepository:
+    """Snapshots de cash por cuenta + lectura del último (para el DCA, §5.4)."""
+
+    def __init__(self, engine: Engine) -> None:
+        self._engine = engine
+
+    def upsert_snapshots(self, snapshots: Sequence[AccountCashLike]) -> int:
+        """Guarda un snapshot de cash por cuenta. Devuelve cuántos se guardaron."""
+        if not snapshots:
+            return 0
+        stmt = text(
+            """
+            INSERT INTO account_cash (account_id, total_cash, available_funds, currency)
+            VALUES (:account_id, :total_cash, :available_funds, :currency)
+            ON CONFLICT (account_id, ts) DO NOTHING
+            """
+        )
+        with self._engine.begin() as conn:
+            id_by_ibkr = {
+                r.ibkr_id: r.id
+                for r in conn.execute(
+                    text("SELECT id, ibkr_id FROM accounts WHERE ibkr_id IS NOT NULL")
+                )
+            }
+            rows = []
+            for c in snapshots:
+                account_id = id_by_ibkr.get(c.account)
+                if account_id is None:
+                    logger.warning("Cash de cuenta IBKR desconocida %s: se ignora.", c.account)
+                    continue
+                rows.append({
+                    "account_id": account_id,
+                    "total_cash": c.total_cash,
+                    "available_funds": c.available_funds,
+                    "currency": c.currency,
+                })
+            if rows:
+                conn.execute(stmt, rows)
+        return len(rows)
+
+    def latest_available(self) -> dict[str, float]:
+        """{ibkr_id: available_funds} del último snapshot de cada cuenta."""
+        stmt = text(
+            "SELECT ibkr_id, available_funds FROM v_account_cash_latest "
+            "WHERE available_funds IS NOT NULL"
+        )
+        with self._engine.connect() as conn:
+            return {r.ibkr_id: float(r.available_funds) for r in conn.execute(stmt)}
+
+
 class DigestLogRepository:
     """Dedupe de los avisos semanales: 1 por (kind, fecha) — §5."""
 

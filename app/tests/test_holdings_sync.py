@@ -6,7 +6,7 @@ Sin gateway, sin ib_async, sin DB: fuente de posiciones y sink inyectados.
 from __future__ import annotations
 
 from portfolio_monitor.config import Settings
-from portfolio_monitor.data.ibkr import IBKRError, Position
+from portfolio_monitor.data.ibkr import AccountCash, IBKRError, Position
 from portfolio_monitor.holdings import HoldingsSyncService
 from portfolio_monitor.scheduler import Scheduler
 
@@ -22,9 +22,11 @@ class FakeSource:
         self,
         positions: list[Position] | None = None,
         connect_error: Exception | None = None,
+        cash: list[AccountCash] | None = None,
     ) -> None:
         self._positions = positions or []
         self._connect_error = connect_error
+        self._cash = cash or []
         self.connected = False
         self.disconnected = False
 
@@ -35,6 +37,9 @@ class FakeSource:
 
     async def fetch_positions(self) -> list[Position]:
         return self._positions
+
+    async def fetch_cash(self) -> list[AccountCash]:
+        return self._cash
 
     def disconnect(self) -> None:
         self.disconnected = True
@@ -47,6 +52,15 @@ class FakeHoldings:
     def upsert_positions(self, positions) -> int:
         self.upserts.append(list(positions))
         return len(positions)
+
+
+class FakeCash:
+    def __init__(self) -> None:
+        self.upserts: list[list[AccountCash]] = []
+
+    def upsert_snapshots(self, snapshots) -> int:
+        self.upserts.append(list(snapshots))
+        return len(snapshots)
 
 
 def _pos(ticker: str = "NVDA") -> Position:
@@ -80,6 +94,27 @@ def test_run_once_empty_positions() -> None:
 
     assert svc.run_once() == 0
     assert holdings.upserts == [[]]
+
+
+def test_run_once_also_syncs_cash_in_same_session() -> None:
+    cash_data = [AccountCash(account="U22106929", total_cash=68.6, available_funds=68.6)]
+    source = FakeSource(positions=[_pos("NVDA")], cash=cash_data)
+    holdings, cash = FakeHoldings(), FakeCash()
+    svc = HoldingsSyncService(
+        _settings(), source_factory=lambda: source, holdings=holdings, cash=cash
+    )
+
+    assert svc.run_once() == 1
+    assert [c.account for c in cash.upserts[0]] == ["U22106929"]  # cash guardado
+    assert source.connected and source.disconnected  # misma sesión
+
+
+def test_run_once_without_cash_sink_skips_cash() -> None:
+    source = FakeSource(positions=[_pos("NVDA")], cash=[AccountCash("U1", 1.0, 1.0)])
+    holdings = FakeHoldings()
+    svc = HoldingsSyncService(_settings(), source_factory=lambda: source, holdings=holdings)
+
+    assert svc.run_once() == 1  # sin cash sink: solo holdings, no rompe
 
 
 # ── Throttle en el Scheduler ─────────────────────────────────────────────────
