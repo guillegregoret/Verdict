@@ -103,7 +103,7 @@ def main() -> None:
 
         # Bot interactivo /status (§5): thread daemon, long-polling, read-only.
         if settings.telegram_bot_enabled and settings.telegram_bot_token:
-            bot = TelegramBot(settings, CommandRouter.from_engine(engine))
+            bot = TelegramBot(settings, CommandRouter.from_engine(engine, reasoning))
             threading.Thread(
                 target=bot.run_forever, name="telegram-bot", daemon=True
             ).start()

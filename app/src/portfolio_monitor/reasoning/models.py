@@ -108,3 +108,21 @@ class MonitorSignal:
 
     context: ReasoningContext
     trigger_type: str
+
+
+@dataclass(frozen=True)
+class PortfolioReviewContext:
+    """Todo el portfolio para una reevaluación integral on-demand (/reevaluar).
+
+    A diferencia de `ReasoningContext` (una señal puntual), esto describe la
+    cartera completa: cada posición con su peso, veredicto y fundamentals, más el
+    cash por cuenta y notas de concentración. El reasoner devuelve una revisión
+    holística (tesis por posición, ideas de compra/venta, uso del cash).
+    """
+
+    positions_block: str          # una línea por holding (peso · veredicto · fundamentals)
+    cash_block: str               # cash disponible por cuenta
+    total_value: float
+    total_cash: float
+    position_count: int
+    note: str | None = None       # concentración / desbalances detectados

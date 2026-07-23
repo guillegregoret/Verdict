@@ -10,6 +10,7 @@ from portfolio_monitor.config import Settings
 from portfolio_monitor.db.repositories import FundamentalsRow
 from portfolio_monitor.reasoning import (
     AnthropicReasoner,
+    PortfolioReviewContext,
     ReasoningContext,
     ReasoningError,
     ReasoningService,
@@ -197,6 +198,9 @@ class _BoomReasoner:
     def generate(self, context: ReasoningContext) -> Suggestion:
         raise ReasoningError("boom")
 
+    def review(self, context: PortfolioReviewContext) -> Suggestion:
+        raise ReasoningError("boom")
+
 
 class _OkReasoner:
     def __init__(self, source: str) -> None:
@@ -204,6 +208,9 @@ class _OkReasoner:
 
     def generate(self, context: ReasoningContext) -> Suggestion:
         return Suggestion(text=f"ok-{self._source}", source=self._source)
+
+    def review(self, context: PortfolioReviewContext) -> Suggestion:
+        return Suggestion(text=f"review-{self._source}", source=self._source)
 
 
 def test_service_uses_primary_when_ok() -> None:
@@ -229,3 +236,43 @@ def _reasoner_type_check(r: Reasoner) -> Reasoner:  # documenta que cumplen el p
 
 def test_reasoners_satisfy_protocol() -> None:
     _reasoner_type_check(TemplateReasoner())
+
+
+# ── Reevaluación integral (/reevaluar) ───────────────────────────────────────
+def _review_context() -> PortfolioReviewContext:
+    return PortfolioReviewContext(
+        positions_block=(
+            "• NVDA 18.0% [Mantener] — P/E 31.0, crec +70%\n"
+            "• GOOG 12.0% [Crecer] — P/E 26.0, crec +17%"
+        ),
+        cash_block="• Satélite IA: $69 USD",
+        total_value=23000.0,
+        total_cash=564.0,
+        position_count=2,
+        note="posiciones pesadas → NVDA 18%",
+    )
+
+
+def test_template_review_dumps_positions_and_cash() -> None:
+    s = TemplateReasoner().review(_review_context())
+    assert s.source == "template"
+    assert "NVDA 18.0%" in s.text
+    assert "Satélite IA" in s.text
+    assert "NVDA 18%" in s.text  # nota de concentración
+
+
+def test_anthropic_review_builds_prompt_and_returns_text() -> None:
+    client = _FakeClient(_Resp([_Block("Cartera sólida, NVDA pesa mucho.")]))
+    reasoner = AnthropicReasoner(_settings(), client=client)
+
+    s = reasoner.review(_review_context())
+
+    assert s == Suggestion(text="Cartera sólida, NVDA pesa mucho.", source="anthropic")
+    prompt = client.messages.last_kwargs["messages"][0]["content"]
+    assert "NVDA 18.0%" in prompt and "Satélite IA" in prompt
+    assert client.messages.last_kwargs["system"]  # system prompt de review
+
+
+def test_service_review_falls_back_on_error() -> None:
+    svc = ReasoningService(primary=_BoomReasoner(), fallback=_OkReasoner("template"))
+    assert svc.review(_review_context()).source == "template"

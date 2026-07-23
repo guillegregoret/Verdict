@@ -4,13 +4,19 @@ Primario Anthropic (Claude) con fallback a un template determinístico. No notif
 devuelve una Suggestion que consume el notifier (§11.7).
 """
 
-from .models import MonitorSignal, ReasoningContext, Suggestion
+from .models import (
+    MonitorSignal,
+    PortfolioReviewContext,
+    ReasoningContext,
+    Suggestion,
+)
 from .reasoners import AnthropicReasoner, Reasoner, ReasoningError, TemplateReasoner
 from .service import ReasoningService
 
 __all__ = [
     "AnthropicReasoner",
     "MonitorSignal",
+    "PortfolioReviewContext",
     "Reasoner",
     "ReasoningContext",
     "ReasoningError",

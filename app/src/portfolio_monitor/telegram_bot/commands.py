@@ -21,10 +21,13 @@ from ..db.repositories import (
     PriceRepository,
     UpcomingEarnings,
 )
+from ..reasoning import ReasoningService
+from ..review import PortfolioReviewService
 
 _HELP = (
     "Comandos:\n"
     "/status — resumen del portfolio y cash\n"
+    "/reevaluar — reevaluación integral: tesis, pesos, ideas (tarda ~30s)\n"
     "/cash — cash disponible por cuenta\n"
     "/earnings — próximos earnings (30 días)\n"
     "/<ticker> — detalle de un ticker (ej: /nvda)\n"
@@ -55,6 +58,10 @@ class FundamentalsReader(Protocol):
     def latest(self, ticker: str) -> FundamentalsRow | None: ...
 
 
+class ReviewLike(Protocol):
+    def review(self, now: datetime | None = ...) -> str: ...
+
+
 class CommandRouter:
     """Despacha comandos del bot a respuestas de texto (read-only)."""
 
@@ -65,21 +72,30 @@ class CommandRouter:
         prices: PriceReader,
         earnings: EarningsReader,
         fundamentals: FundamentalsReader,
+        review: ReviewLike | None = None,
     ) -> None:
         self._cash = cash
         self._holdings = holdings
         self._prices = prices
         self._earnings = earnings
         self._fundamentals = fundamentals
+        self._review = review
 
     @classmethod
-    def from_engine(cls, engine: Engine) -> CommandRouter:
+    def from_engine(
+        cls, engine: Engine, reasoning: ReasoningService | None = None
+    ) -> CommandRouter:
         return cls(
             cash=CashRepository(engine),
             holdings=HoldingsRepository(engine),
             prices=PriceRepository(engine),
             earnings=EarningsRepository(engine),
             fundamentals=FundamentalsRepository(engine),
+            review=(
+                PortfolioReviewService.from_engine(engine, reasoning)
+                if reasoning is not None
+                else None
+            ),
         )
 
     def handle(self, text: str, now: datetime | None = None) -> str:
@@ -90,6 +106,10 @@ class CommandRouter:
             return _HELP
         if cmd == "status":
             return self._status(now)
+        if cmd in ("reevaluar", "review"):
+            if self._review is None:
+                return "Reevaluación no disponible (falta configurar el reasoner)."
+            return self._review.review(now)
         if cmd == "cash":
             return self._cash_report()
         if cmd == "earnings":

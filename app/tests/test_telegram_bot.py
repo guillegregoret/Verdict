@@ -11,7 +11,7 @@ from portfolio_monitor.db.repositories import (
     UpcomingEarnings,
 )
 from portfolio_monitor.telegram_bot import CommandRouter, TelegramBot
-from portfolio_monitor.telegram_bot.bot import _parse_ids
+from portfolio_monitor.telegram_bot.bot import _parse_ids, _split_message
 
 NOW = datetime(2026, 7, 17, 12, 0, tzinfo=UTC)
 
@@ -113,9 +113,20 @@ class FakeFundamentals:
         return FundamentalsRow("NVDA", NOW, 31.5, 0.70, 0.74, 0.04)
 
 
-def _router() -> CommandRouter:
+class FakeReview:
+    def __init__(self, text: str = "reevaluación integral") -> None:
+        self._text = text
+        self.calls = 0
+
+    def review(self, now: datetime | None = None) -> str:
+        self.calls += 1
+        return self._text
+
+
+def _router(review: FakeReview | None = None) -> CommandRouter:
     return CommandRouter(
-        FakeCash(), FakeHoldings(), FakePrices(), FakeEarnings(), FakeFundamentals()
+        FakeCash(), FakeHoldings(), FakePrices(), FakeEarnings(), FakeFundamentals(),
+        review=review,
     )
 
 
@@ -153,3 +164,81 @@ def test_router_ticker_detail() -> None:
 def test_router_unknown_command() -> None:
     out = _router().handle("/xyz")
     assert "No entendí" in out
+
+
+def test_router_reevaluar_routes_to_review() -> None:
+    review = FakeReview("cartera OK")
+    out = _router(review=review).handle("/reevaluar", now=NOW)
+    assert out == "cartera OK"
+    assert review.calls == 1
+
+
+def test_router_reevaluar_without_service_is_graceful() -> None:
+    out = _router(review=None).handle("/reevaluar")
+    assert "no disponible" in out.lower()
+
+
+def test_help_lists_reevaluar() -> None:
+    assert "/reevaluar" in _router().handle("/help")
+
+
+# ── Partido de mensajes largos ───────────────────────────────────────────────
+def test_split_message_short_is_single() -> None:
+    assert _split_message("hola") == ["hola"]
+
+
+def test_split_message_breaks_on_lines() -> None:
+    text = "\n".join(f"linea {i}" for i in range(500))
+    chunks = _split_message(text, limit=100)
+    assert len(chunks) > 1
+    assert all(len(c) <= 100 for c in chunks)
+    # sin perder contenido (se re-unen con el mismo separador)
+    assert "\n".join(chunks) == text
+
+
+def test_split_message_hard_splits_oversize_line() -> None:
+    chunks = _split_message("x" * 250, limit=100)
+    assert [len(c) for c in chunks] == [100, 100, 50]
+
+
+# ── ack del comando lento + partido en el envío ──────────────────────────────
+class _RecordingClient:
+    def __init__(self) -> None:
+        self.sent: list[str] = []
+
+    def post(self, url: str, json: dict) -> None:
+        self.sent.append(json["text"])
+
+
+def test_process_acks_slow_command_then_sends_chunks() -> None:
+    client = _RecordingClient()
+    long_review = "\n".join(f"linea {i}" for i in range(2000))  # supera el límite
+    bot = TelegramBot(
+        Settings(_env_file=None, telegram_bot_token="t", telegram_allowed_user_ids="111"),
+        _EchoRouter(long_review),
+        client=client,  # type: ignore[arg-type]
+    )
+    bot._process(_update("/reevaluar", user_id=111))
+    # primer mensaje = ack; luego ≥2 trozos con el contenido
+    assert client.sent[0].startswith("🔍")
+    assert len(client.sent) >= 3
+    assert "linea 0" in client.sent[1]
+
+
+def test_process_does_not_ack_light_command() -> None:
+    client = _RecordingClient()
+    bot = TelegramBot(
+        Settings(_env_file=None, telegram_bot_token="t", telegram_allowed_user_ids="111"),
+        _EchoRouter("corto"),
+        client=client,  # type: ignore[arg-type]
+    )
+    bot._process(_update("/status", user_id=111))
+    assert client.sent == ["corto"]
+
+
+class _EchoRouter:
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    def handle(self, text: str) -> str:
+        return self._text

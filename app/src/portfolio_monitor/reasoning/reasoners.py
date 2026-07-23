@@ -12,7 +12,7 @@ from typing import Any, Protocol
 
 from ..config import Settings
 from ..logging import get_logger
-from .models import ReasoningContext, Suggestion
+from .models import PortfolioReviewContext, ReasoningContext, Suggestion
 
 logger = get_logger(__name__)
 
@@ -31,6 +31,23 @@ _SYSTEM_PROMPT = (
     "que no estén en el contexto; si faltan fundamentals, decilo."
 )
 
+_REVIEW_SYSTEM_PROMPT = (
+    "Sos un asistente de análisis de cartera READ-ONLY. NUNCA ejecutás órdenes: "
+    "el usuario decide y ejecuta manualmente en su broker. Te paso el portfolio "
+    "COMPLETO: cada posición con su peso %, veredicto configurado y fundamentals, "
+    "más el cash por cuenta. Hacé una REEVALUACIÓN INTEGRAL:\n"
+    "1) Tesis por posición: en una línea por ticker, decí si la tesis SIGUE EN PIE "
+    "según sus fundamentals y el veredicto, o si conviene revisarla.\n"
+    "2) Concentración: señalá pesos altos o desbalances relevantes.\n"
+    "3) Ideas de COMPRA (posiciones con tesis intacta para sumar en dips) y de "
+    "VENTA/TRIM. Respetá el veredicto: 'Mantener - no sumar' NO se suma, 'Trim' se "
+    "reduce, 'Consolidar' se rota; 'Crecer'/'Mantener' son candidatos de compra.\n"
+    "4) Cash: qué hacer con el disponible por cuenta.\n"
+    "Español rioplatense, conciso pero completo, con bullets y el ticker al inicio "
+    "de cada línea. No inventes datos fuera del contexto; si a un ticker le faltan "
+    "fundamentals, decilo."
+)
+
 # Etiqueta legible de la acción a evaluar (deriva del veredicto / la señal).
 _ACTION_LABELS = {
     "comprar_dip": "evaluar SUMAR en la caída",
@@ -46,6 +63,7 @@ class ReasoningError(RuntimeError):
 
 class Reasoner(Protocol):
     def generate(self, context: ReasoningContext) -> Suggestion: ...
+    def review(self, context: PortfolioReviewContext) -> Suggestion: ...
 
 
 def _format_fundamentals(context: ReasoningContext) -> str:
@@ -81,6 +99,22 @@ def _format_dca(context: ReasoningContext) -> str:
 
 def _action_label(context: ReasoningContext) -> str:
     return _ACTION_LABELS.get(context.action, context.action)
+
+
+def _review_user_prompt(context: PortfolioReviewContext) -> str:
+    """Prompt de usuario para la reevaluación integral (/reevaluar)."""
+    lines = [
+        "Reevaluá esta cartera completa:",
+        "",
+        f"Resumen: {context.position_count} posiciones · valor de mercado "
+        f"${context.total_value:,.0f} · cash disponible ${context.total_cash:,.0f}.",
+    ]
+    if context.note:
+        lines.append(f"Concentración: {context.note}")
+    lines += ["", "Posiciones (peso · veredicto · fundamentals):", context.positions_block]
+    if context.cash_block:
+        lines += ["", "Cash por cuenta:", context.cash_block]
+    return "\n".join(lines)
 
 
 _SIGNAL_HEADERS = {
@@ -142,6 +176,20 @@ class TemplateReasoner:
             body += f" {dca}."
         return Suggestion(text=f"{header} {body}", source="template")
 
+    def review(self, context: PortfolioReviewContext) -> Suggestion:
+        """Reevaluación básica sin Claude: vuelca posiciones + cash tal cual."""
+        lines = [
+            f"📊 Reevaluación del portfolio — {context.position_count} posiciones · "
+            f"${context.total_value:,.0f} · cash ${context.total_cash:,.0f}",
+        ]
+        if context.note:
+            lines.append(f"⚠️ {context.note}")
+        lines += ["", context.positions_block]
+        if context.cash_block:
+            lines += ["", "Cash por cuenta:", context.cash_block]
+        lines.append("\n(Sin Claude disponible: revisión automática básica.)")
+        return Suggestion(text="\n".join(lines), source="template")
+
 
 class AnthropicReasoner:
     """Genera la sugerencia con Claude (Anthropic Messages API)."""
@@ -176,6 +224,30 @@ class AnthropicReasoner:
             raise ReasoningError(
                 f"Anthropic rechazó la sugerencia para {context.ticker}."
             )
+
+        text = "".join(
+            block.text
+            for block in resp.content
+            if getattr(block, "type", None) == "text"
+        ).strip()
+        if not text:
+            raise ReasoningError("Respuesta vacía de Anthropic.")
+        return Suggestion(text=text, source="anthropic")
+
+    def review(self, context: PortfolioReviewContext) -> Suggestion:
+        """Reevaluación integral del portfolio con Claude (/reevaluar)."""
+        try:
+            resp = self._client.messages.create(
+                model=self._settings.anthropic_model,
+                max_tokens=2000,
+                system=_REVIEW_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": _review_user_prompt(context)}],
+            )
+        except Exception as exc:  # noqa: BLE001 - normalizamos errores del SDK
+            raise ReasoningError(f"Fallo llamando a Anthropic: {exc}") from exc
+
+        if getattr(resp, "stop_reason", None) == "refusal":
+            raise ReasoningError("Anthropic rechazó la reevaluación del portfolio.")
 
         text = "".join(
             block.text
