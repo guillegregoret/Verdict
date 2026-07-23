@@ -223,6 +223,62 @@ def _decay_event(ticker: str = "NVDA") -> FundamentalsEvent:
     )
 
 
+class FakePostEarningsMonitor:
+    """Emite una señal de monitor SIN fundamentals propios (como post-earnings)."""
+
+    def __init__(self, ticker: str = "NVDA") -> None:
+        self._ticker = ticker
+
+    def signals(self) -> list[MonitorSignal]:
+        ctx = ReasoningContext(
+            ticker=self._ticker, verdict="Mantener",
+            signal_kind="post_earnings", action="revisar_tesis",
+            note="reportó: sorpresa +4%",
+        )
+        return [MonitorSignal(ctx, "post_earnings")]
+
+
+def test_monitor_signal_is_enriched_with_fundamentals() -> None:
+    # una señal de monitor sin fundamentals debe recibir los del reader (§5.3):
+    # así Claude verifica la tesis en earnings/rating en vez de "no disponibles".
+    row = FundamentalsRow(
+        ticker="NVDA", ts=datetime(2026, 7, 22, tzinfo=UTC), pe=31.0,
+        revenue_growth=0.7, gross_margin=0.75, debt_to_equity=0.3,
+    )
+    reasoning = FakeReasoning()
+    pipeline = AlertPipeline(
+        trigger=FakeTrigger([]),
+        fundamentals=FakeFundamentals(row=row),
+        reasoning=reasoning,
+        notifier=FakeNotifier(),
+        alerts=FakeAlerts(),
+        monitors=[FakePostEarningsMonitor("NVDA")],
+    )
+    assert pipeline.run_once() == 1
+    assert reasoning.contexts[0].fundamentals is row
+
+
+def test_decay_signal_keeps_its_own_fundamentals() -> None:
+    # el deterioro ya trae sus fundamentals (event.current): no se pisan.
+    reasoning = FakeReasoning()
+    other = FundamentalsRow(
+        ticker="NVDA", ts=datetime(2026, 7, 22, tzinfo=UTC), pe=99.0,
+        revenue_growth=0.1, gross_margin=0.4, debt_to_equity=0.9,
+    )
+    pipeline = AlertPipeline(
+        trigger=FakeTrigger([]),
+        fundamentals=FakeFundamentals(row=other),  # no debe usarse
+        reasoning=reasoning,
+        notifier=FakeNotifier(),
+        alerts=FakeAlerts(),
+        monitors=[FakeDecayMonitor([_decay_event("NVDA")])],
+    )
+    assert pipeline.run_once() == 1
+    # conserva el snapshot del evento de deterioro, no el del reader
+    assert reasoning.contexts[0].fundamentals is not other
+    assert reasoning.contexts[0].fundamentals.gross_margin == 0.68
+
+
 def test_fundamentals_decay_event_is_alerted() -> None:
     reasoning = FakeReasoning()
     notifier = FakeNotifier()

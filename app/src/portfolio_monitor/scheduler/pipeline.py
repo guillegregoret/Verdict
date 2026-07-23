@@ -12,6 +12,7 @@ Por cada señal: arma el contexto, genera la sugerencia, la manda por Telegram y
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import Protocol
 
 from sqlalchemy import Engine
@@ -151,7 +152,7 @@ class AlertPipeline:
             monitor_signals.extend(monitor.signals())
         for signal in monitor_signals:
             if self._dispatch(
-                signal.context,
+                self._with_fundamentals(signal.context),
                 trigger_type=signal.trigger_type,
                 pct_change=0.0,
                 window_minutes=0,
@@ -172,6 +173,18 @@ class AlertPipeline:
                 "Fundamentals %s no disponibles (%s); sigo sin ellos.", ticker, exc
             )
             return None
+
+    def _with_fundamentals(self, context: ReasoningContext) -> ReasoningContext:
+        """Adjunta fundamentals frescos a una señal de monitor para el análisis.
+
+        Los monitores (post-earnings, rating, …) no cargan fundamentals: sin
+        esto, el reasoner leería "no disponibles" justo cuando más importan
+        (verificar la tesis en earnings / cambios de rating). Si la señal ya los
+        trae (deterioro), se respeta. Best-effort: si faltan, sigue sin ellos.
+        """
+        if context.fundamentals is not None:
+            return context
+        return replace(context, fundamentals=self._safe_latest(context.ticker))
 
     def _dispatch(
         self,
