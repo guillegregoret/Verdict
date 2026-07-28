@@ -11,6 +11,7 @@ from typing import Protocol
 
 from sqlalchemy import Engine
 
+from ..config import Settings
 from ..db.repositories import (
     AccountCashRow,
     CashRepository,
@@ -22,7 +23,7 @@ from ..db.repositories import (
     UpcomingEarnings,
 )
 from ..reasoning import ReasoningService
-from ..review import PortfolioReviewService
+from ..report import ReportService
 
 _HELP = (
     "Comandos:\n"
@@ -58,8 +59,8 @@ class FundamentalsReader(Protocol):
     def latest(self, ticker: str) -> FundamentalsRow | None: ...
 
 
-class ReviewLike(Protocol):
-    def review(self, now: datetime | None = ...) -> str: ...
+class ReportLike(Protocol):
+    def deliver(self, now: datetime | None = ...) -> str: ...
 
 
 class CommandRouter:
@@ -72,18 +73,21 @@ class CommandRouter:
         prices: PriceReader,
         earnings: EarningsReader,
         fundamentals: FundamentalsReader,
-        review: ReviewLike | None = None,
+        report: ReportLike | None = None,
     ) -> None:
         self._cash = cash
         self._holdings = holdings
         self._prices = prices
         self._earnings = earnings
         self._fundamentals = fundamentals
-        self._review = review
+        self._report = report
 
     @classmethod
     def from_engine(
-        cls, engine: Engine, reasoning: ReasoningService | None = None
+        cls,
+        engine: Engine,
+        reasoning: ReasoningService | None = None,
+        settings: Settings | None = None,
     ) -> CommandRouter:
         return cls(
             cash=CashRepository(engine),
@@ -91,8 +95,8 @@ class CommandRouter:
             prices=PriceRepository(engine),
             earnings=EarningsRepository(engine),
             fundamentals=FundamentalsRepository(engine),
-            review=(
-                PortfolioReviewService.from_engine(engine, reasoning)
+            report=(
+                ReportService.from_engine(engine, reasoning, settings or Settings())
                 if reasoning is not None
                 else None
             ),
@@ -107,9 +111,9 @@ class CommandRouter:
         if cmd == "status":
             return self._status(now)
         if cmd in ("reevaluar", "review"):
-            if self._review is None:
+            if self._report is None:
                 return "Reevaluación no disponible (falta configurar el reasoner)."
-            return self._review.review(now)
+            return self._report.deliver(now)
         if cmd == "cash":
             return self._cash_report()
         if cmd == "earnings":

@@ -113,20 +113,20 @@ class FakeFundamentals:
         return FundamentalsRow("NVDA", NOW, 31.5, 0.70, 0.74, 0.04)
 
 
-class FakeReview:
-    def __init__(self, text: str = "reevaluación integral") -> None:
+class FakeReport:
+    def __init__(self, text: str = "📧 sent to inbox") -> None:
         self._text = text
         self.calls = 0
 
-    def review(self, now: datetime | None = None) -> str:
+    def deliver(self, now: datetime | None = None) -> str:
         self.calls += 1
         return self._text
 
 
-def _router(review: FakeReview | None = None) -> CommandRouter:
+def _router(report: FakeReport | None = None) -> CommandRouter:
     return CommandRouter(
         FakeCash(), FakeHoldings(), FakePrices(), FakeEarnings(), FakeFundamentals(),
-        review=review,
+        report=report,
     )
 
 
@@ -166,15 +166,15 @@ def test_router_unknown_command() -> None:
     assert "No entendí" in out
 
 
-def test_router_reevaluar_routes_to_review() -> None:
-    review = FakeReview("cartera OK")
-    out = _router(review=review).handle("/reevaluar", now=NOW)
-    assert out == "cartera OK"
-    assert review.calls == 1
+def test_router_reevaluar_routes_to_report() -> None:
+    report = FakeReport("📧 sent to inbox")
+    out = _router(report=report).handle("/reevaluar", now=NOW)
+    assert out == "📧 sent to inbox"
+    assert report.calls == 1
 
 
 def test_router_reevaluar_without_service_is_graceful() -> None:
-    out = _router(review=None).handle("/reevaluar")
+    out = _router(report=None).handle("/reevaluar")
     assert "no disponible" in out.lower()
 
 

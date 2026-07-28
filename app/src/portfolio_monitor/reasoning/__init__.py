@@ -8,6 +8,7 @@ from .models import (
     MonitorSignal,
     PortfolioReviewContext,
     ReasoningContext,
+    ReviewPosition,
     Suggestion,
 )
 from .reasoners import AnthropicReasoner, Reasoner, ReasoningError, TemplateReasoner
@@ -21,6 +22,7 @@ __all__ = [
     "ReasoningContext",
     "ReasoningError",
     "ReasoningService",
+    "ReviewPosition",
     "Suggestion",
     "TemplateReasoner",
 ]

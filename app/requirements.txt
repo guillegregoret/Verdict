@@ -15,3 +15,6 @@ anthropic==0.116.0
 # Config / entorno (pydantic-settings ya trae python-dotenv para leer .env)
 pydantic==2.13.4
 pydantic-settings==2.14.2
+
+# Render del reporte por email (markdown de Claude → HTML)
+markdown==3.7

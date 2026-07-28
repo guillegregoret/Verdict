@@ -100,6 +100,25 @@ class Settings(BaseSettings):
     telegram_bot_enabled: bool = True
     telegram_allowed_user_ids: str = ""
 
+    # ── Email (reporte de reevaluación, §5) ──────────────────────────────────
+    # Proveedor de envío: Resend (Cloudflare hace de DNS: SPF/DKIM/DMARC). Si
+    # falta cualquiera de estos, el reporte cae al texto en Telegram (no rompe).
+    email_enabled: bool = False
+    resend_api_key: str = ""
+    resend_base_url: str = "https://api.resend.com"
+    email_from: str = ""   # ej: "Verdict <verdict@mail.tudominio.com>"
+    email_to: str = ""     # tu inbox
+
+    @property
+    def email_configured(self) -> bool:
+        """True si el envío de mail está listo para usarse."""
+        return bool(
+            self.email_enabled
+            and self.resend_api_key
+            and self.email_from
+            and self.email_to
+        )
+
     # ── Monitoreo (§9) ───────────────────────────────────────────────────────
     # Dead-man's switch: la app pinga esta URL cada tick. Si deja de pingar → aviso.
     healthchecks_ping_url: str = ""
