@@ -21,6 +21,8 @@ from ..db.repositories import (
     AlertRepository,
     FundamentalsRepository,
     FundamentalsRow,
+    HoldingsRepository,
+    PriceRepository,
 )
 from ..dca import DcaSuggestion
 from ..logging import get_logger
@@ -52,6 +54,14 @@ class DcaSizerLike(Protocol):
 
 class FundamentalsReader(Protocol):
     def latest(self, ticker: str) -> FundamentalsRow | None: ...
+
+
+class CostBasisReader(Protocol):
+    def avg_cost_by_ticker(self) -> dict[str, float]: ...
+
+
+class PriceReader(Protocol):
+    def latest_price(self, ticker: str) -> float | None: ...
 
 
 class SuggestionMaker(Protocol):
@@ -87,6 +97,8 @@ class AlertPipeline:
         alerts: AlertSink,
         monitors: Sequence[MonitorLike] = (),
         dca: DcaSizerLike | None = None,
+        holdings: CostBasisReader | None = None,
+        prices: PriceReader | None = None,
     ) -> None:
         self._trigger = trigger
         self._fundamentals = fundamentals
@@ -95,6 +107,8 @@ class AlertPipeline:
         self._alerts = alerts
         self._monitors = tuple(monitors)
         self._dca = dca
+        self._holdings = holdings
+        self._prices = prices
 
     @classmethod
     def from_engine(
@@ -120,11 +134,14 @@ class AlertPipeline:
             alerts=AlertRepository(engine),
             monitors=monitors,
             dca=dca,
+            holdings=HoldingsRepository(engine),
+            prices=PriceRepository(engine),
         )
 
     def run_once(self) -> int:
         """Un ciclo. Devuelve cuántas alertas se enviaron."""
         sent = 0
+        avg_costs = self._avg_costs()
 
         price_events = self._trigger.evaluate()
         for event in price_events:
@@ -138,6 +155,7 @@ class AlertPipeline:
                 fundamentals=self._safe_latest(event.ticker),
                 bucket_remaining=dca.available_cash if dca else None,
                 dca_suggested_usd=dca.amount_usd if dca else None,
+                avg_cost=avg_costs.get(event.ticker),
             )
             if self._dispatch(
                 context,
@@ -152,7 +170,7 @@ class AlertPipeline:
             monitor_signals.extend(monitor.signals())
         for signal in monitor_signals:
             if self._dispatch(
-                self._with_fundamentals(signal.context),
+                self._with_position(self._with_fundamentals(signal.context), avg_costs),
                 trigger_type=signal.trigger_type,
                 pct_change=0.0,
                 window_minutes=0,
@@ -185,6 +203,37 @@ class AlertPipeline:
         if context.fundamentals is not None:
             return context
         return replace(context, fundamentals=self._safe_latest(context.ticker))
+
+    def _avg_costs(self) -> dict[str, float]:
+        """Costo promedio por ticker, best-effort (un fallo no frena las alertas)."""
+        if self._holdings is None:
+            return {}
+        try:
+            return self._holdings.avg_cost_by_ticker()
+        except Exception as exc:  # noqa: BLE001 - best-effort
+            logger.warning("Costos promedio no disponibles (%s); sigo sin ellos.", exc)
+            return {}
+
+    def _with_position(
+        self, context: ReasoningContext, avg_costs: dict[str, float]
+    ) -> ReasoningContext:
+        """Adjunta costo promedio (y precio actual) a una señal de monitor.
+
+        Las señales de monitor no traen precio ni costo: sin esto el reasoner no
+        puede decir si la posición viene en verde o en rojo, y termina sugiriendo
+        "tomar ganancias" sobre una posición que está en pérdida.
+        """
+        price = context.current_price
+        if price == 0 and self._prices is not None:
+            try:
+                price = self._prices.latest_price(context.ticker) or 0.0
+            except Exception as exc:  # noqa: BLE001 - best-effort
+                logger.warning("Precio %s no disponible (%s).", context.ticker, exc)
+        return replace(
+            context,
+            current_price=price,
+            avg_cost=avg_costs.get(context.ticker, context.avg_cost),
+        )
 
     def _dispatch(
         self,

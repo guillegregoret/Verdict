@@ -17,7 +17,7 @@ from portfolio_monitor.reasoning import (
     Suggestion,
     TemplateReasoner,
 )
-from portfolio_monitor.reasoning.reasoners import Reasoner
+from portfolio_monitor.reasoning.reasoners import Reasoner, _build_context_block
 from portfolio_monitor.trigger import TriggerEvent
 
 
@@ -39,6 +39,7 @@ def _context(
     pct_change: float = -5.2,
     verdict: str = "Mantener",
     action: str = "comprar_dip",
+    avg_cost: float | None = None,
 ):
     return ReasoningContext(
         ticker="NVDA",
@@ -50,6 +51,7 @@ def _context(
         action=action,
         fundamentals=fundamentals,
         bucket_remaining=bucket,
+        avg_cost=avg_cost,
     )
 
 
@@ -114,6 +116,35 @@ def test_template_frames_fundamentals_decay() -> None:
     assert "⚠️" in s.text
     assert "deteriorados" in s.text
     assert "margen bruto" in s.text
+
+
+def test_unrealized_pnl_is_computed_from_avg_cost() -> None:
+    ctx = _context(avg_cost=100.0)   # precio 95 contra costo 100
+    assert ctx.unrealized_pct == -5.0
+    assert _context().unrealized_pct is None          # sin costo → desconocido
+    assert _context(avg_cost=0.0).unrealized_pct is None  # costo 0 → no dividimos
+
+
+def test_template_shows_loss_even_when_market_rose() -> None:
+    # el caso MRVL: el papel sube en la ventana pero la posición está en rojo.
+    ctx = _context(
+        pct_change=4.5, verdict="Consolidar", action="consolidar", avg_cost=252.84
+    )
+    s = TemplateReasoner().generate(ctx)
+    assert "📈" in s.text            # el mercado subió
+    assert "EN PÉRDIDA" in s.text    # pero la posición no es una ganancia
+    assert "252.84" in s.text
+
+
+def test_prompt_separates_market_move_from_my_position() -> None:
+    ctx = _context(pct_change=4.5, verdict="Consolidar", avg_cost=252.84)
+    block = _build_context_block(ctx)
+    assert "Movimiento del mercado: +4.50%" in block
+    assert "Mi posición: EN PÉRDIDA" in block
+
+
+def test_prompt_omits_position_line_without_cost() -> None:
+    assert "Mi posición" not in _build_context_block(_context())
 
 
 def test_context_carries_action_from_event() -> None:

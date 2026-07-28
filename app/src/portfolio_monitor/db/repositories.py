@@ -246,6 +246,22 @@ class HoldingsRepository:
         with self._engine.connect() as conn:
             return {r.ticker: float(r.shares) for r in conn.execute(stmt)}
 
+    def avg_cost_by_ticker(self) -> dict[str, float]:
+        """Mapa {ticker: costo promedio por acción} ponderado entre cuentas.
+
+        Un mismo ticker puede estar en varias cuentas con costos distintos (ej:
+        ISRG); el promedio ponderado por shares es el costo real de la posición
+        consolidada. Insumo del P&L no realizado que ve el reasoner: sin esto
+        una suba de mercado se lee como "ganancia" aunque la posición esté roja.
+        """
+        stmt = text(
+            "SELECT ticker, sum(shares * avg_cost) / sum(shares) AS avg_cost "
+            "FROM holdings WHERE shares IS NOT NULL AND avg_cost IS NOT NULL "
+            "AND shares <> 0 GROUP BY ticker HAVING sum(shares) <> 0"
+        )
+        with self._engine.connect() as conn:
+            return {r.ticker: float(r.avg_cost) for r in conn.execute(stmt)}
+
     def account_by_ticker(self) -> dict[str, str]:
         """Mapa {ticker: ibkr_id} — qué cuenta tiene cada ticker (para el DCA, §5.4)."""
         stmt = text(

@@ -279,6 +279,86 @@ def test_decay_signal_keeps_its_own_fundamentals() -> None:
     assert reasoning.contexts[0].fundamentals.gross_margin == 0.68
 
 
+class FakeHoldings:
+    """Costos promedio por ticker (lo que el usuario pagó realmente)."""
+
+    def __init__(self, costs: dict[str, float], raises: bool = False) -> None:
+        self._costs = costs
+        self._raises = raises
+
+    def avg_cost_by_ticker(self) -> dict[str, float]:
+        if self._raises:
+            raise RuntimeError("holdings boom")
+        return dict(self._costs)
+
+
+class FakePrices:
+    def __init__(self, price: float | None = None) -> None:
+        self._price = price
+
+    def latest_price(self, ticker: str) -> float | None:
+        return self._price
+
+
+def test_price_event_carries_unrealized_pnl() -> None:
+    # el movimiento de mercado (+) puede convivir con una posición en rojo:
+    # el reasoner tiene que ver AMBOS para no sugerir "tomar ganancias" en pérdida.
+    reasoning = FakeReasoning()
+    event = TriggerEvent(
+        ticker="MRVL", pct_change=4.48, window_minutes=390,
+        reference_price=170.4, current_price=178.0, verdict="Consolidar",
+        trigger_type="rise_pct", action="consolidar",
+    )
+    pipeline = AlertPipeline(
+        trigger=FakeTrigger([event]),
+        fundamentals=FakeFundamentals(),
+        reasoning=reasoning,
+        notifier=FakeNotifier(),
+        alerts=FakeAlerts(),
+        holdings=FakeHoldings({"MRVL": 252.84}),
+    )
+    assert pipeline.run_once() == 1
+    ctx = reasoning.contexts[0]
+    assert ctx.avg_cost == 252.84
+    assert ctx.pct_change > 0            # el mercado subió
+    assert ctx.unrealized_pct < -29      # pero la posición está en rojo
+
+
+def test_monitor_signal_gets_cost_and_current_price() -> None:
+    # las señales de monitor no traen precio ni costo: el pipeline los completa.
+    reasoning = FakeReasoning()
+    pipeline = AlertPipeline(
+        trigger=FakeTrigger([]),
+        fundamentals=FakeFundamentals(),
+        reasoning=reasoning,
+        notifier=FakeNotifier(),
+        alerts=FakeAlerts(),
+        monitors=[FakePostEarningsMonitor("NVDA")],
+        holdings=FakeHoldings({"NVDA": 100.0}),
+        prices=FakePrices(120.0),
+    )
+    assert pipeline.run_once() == 1
+    ctx = reasoning.contexts[0]
+    assert ctx.current_price == 120.0
+    assert ctx.unrealized_pct == 20.0
+
+
+def test_missing_cost_basis_leaves_pnl_unknown() -> None:
+    # sin costo (o si el repo falla) no se asume nada: unrealized_pct = None.
+    reasoning = FakeReasoning()
+    pipeline = AlertPipeline(
+        trigger=FakeTrigger([_event("NVDA")]),
+        fundamentals=FakeFundamentals(),
+        reasoning=reasoning,
+        notifier=FakeNotifier(),
+        alerts=FakeAlerts(),
+        holdings=FakeHoldings({}, raises=True),
+    )
+    assert pipeline.run_once() == 1
+    assert reasoning.contexts[0].avg_cost is None
+    assert reasoning.contexts[0].unrealized_pct is None
+
+
 def test_fundamentals_decay_event_is_alerted() -> None:
     reasoning = FakeReasoning()
     notifier = FakeNotifier()

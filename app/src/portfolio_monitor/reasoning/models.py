@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import date
 from typing import TYPE_CHECKING
 
 from ..db.repositories import FundamentalsRow
@@ -35,6 +36,19 @@ class ReasoningContext:
     fundamentals: FundamentalsRow | None = None
     bucket_remaining: float | None = None   # cash disponible en la cuenta (§5.4)
     dca_suggested_usd: float | None = None  # monto de DCA sugerido en el dip (§5.4)
+    avg_cost: float | None = None           # costo promedio por acción (mi posición)
+
+    @property
+    def unrealized_pct(self) -> float | None:
+        """P&L no realizado de MI posición (%), o None si falta el costo/precio.
+
+        El movimiento (`pct_change`) es del mercado en la ventana; esto es otra
+        cosa: cómo vengo YO respecto de lo que pagué. Una suba del 4% puede
+        convivir con una posición -30% en rojo.
+        """
+        if self.avg_cost is None or self.avg_cost == 0 or self.current_price == 0:
+            return None
+        return (self.current_price - self.avg_cost) / self.avg_cost * 100.0
 
     @classmethod
     def from_trigger_event(
@@ -43,6 +57,7 @@ class ReasoningContext:
         fundamentals: FundamentalsRow | None = None,
         bucket_remaining: float | None = None,
         dca_suggested_usd: float | None = None,
+        avg_cost: float | None = None,
     ) -> ReasoningContext:
         """Contexto de una señal de precio a partir de un TriggerEvent (§11.4)."""
         return cls(
@@ -57,6 +72,7 @@ class ReasoningContext:
             fundamentals=fundamentals,
             bucket_remaining=bucket_remaining,
             dca_suggested_usd=dca_suggested_usd,
+            avg_cost=avg_cost,
         )
 
     @classmethod
@@ -111,6 +127,19 @@ class MonitorSignal:
 
 
 @dataclass(frozen=True)
+class ReviewPosition:
+    """Una posición dentro de la reevaluación (para tablas y barras del reporte)."""
+
+    ticker: str
+    weight: float                 # % del portfolio por valor de mercado
+    verdict: str
+    market_value: float
+    fundamentals_text: str        # resumen legible (o "fundamentals no disponibles")
+    earnings: date | None = None  # próximo earnings, si hay
+    unrealized_pct: float | None = None  # P&L no realizado vs mi costo promedio
+
+
+@dataclass(frozen=True)
 class PortfolioReviewContext:
     """Todo el portfolio para una reevaluación integral on-demand (/reevaluar).
 
@@ -126,3 +155,5 @@ class PortfolioReviewContext:
     total_cash: float
     position_count: int
     note: str | None = None       # concentración / desbalances detectados
+    positions: tuple[ReviewPosition, ...] = field(default_factory=tuple)  # estructurado
+    cash_accounts: tuple[tuple[str, float, str], ...] = field(default_factory=tuple)

@@ -28,24 +28,39 @@ _SYSTEM_PROMPT = (
     "sigue en pie o conviene revisarla. Respondé en español rioplatense, en 2 a 4 "
     "oraciones, concreto y accionable. Si el contexto trae un DCA sugerido, "
     "mencioná el monto y que está topeado al cash disponible. No inventes datos "
-    "que no estén en el contexto; si faltan fundamentals, decilo."
+    "que no estén en el contexto; si faltan fundamentals, decilo.\n"
+    "CRÍTICO — no confundas el movimiento del mercado con la ganancia del "
+    "usuario: el % de movimiento es de la ventana, mientras que 'Mi posición' "
+    "dice cómo viene el usuario contra su costo promedio. NUNCA hables de "
+    "'tomar ganancias' si la posición está EN PÉRDIDA; en ese caso, si el "
+    "veredicto es Trim/Consolidar, encuadralo como usar el rebote para salir "
+    "(reducir la pérdida / rotar), aclarando que se vende en rojo. Y si la "
+    "posición está en ganancia fuerte, decilo. Si no hay dato de posición, no "
+    "asumas ni ganancia ni pérdida."
 )
 
 _REVIEW_SYSTEM_PROMPT = (
-    "Sos un asistente de análisis de cartera READ-ONLY. NUNCA ejecutás órdenes: "
-    "el usuario decide y ejecuta manualmente en su broker. Te paso el portfolio "
-    "COMPLETO: cada posición con su peso %, veredicto configurado y fundamentals, "
-    "más el cash por cuenta. Hacé una REEVALUACIÓN INTEGRAL:\n"
-    "1) Tesis por posición: en una línea por ticker, decí si la tesis SIGUE EN PIE "
-    "según sus fundamentals y el veredicto, o si conviene revisarla.\n"
-    "2) Concentración: señalá pesos altos o desbalances relevantes.\n"
-    "3) Ideas de COMPRA (posiciones con tesis intacta para sumar en dips) y de "
-    "VENTA/TRIM. Respetá el veredicto: 'Mantener - no sumar' NO se suma, 'Trim' se "
-    "reduce, 'Consolidar' se rota; 'Crecer'/'Mantener' son candidatos de compra.\n"
-    "4) Cash: qué hacer con el disponible por cuenta.\n"
-    "Español rioplatense, conciso pero completo, con bullets y el ticker al inicio "
-    "de cada línea. No inventes datos fuera del contexto; si a un ticker le faltan "
-    "fundamentals, decilo."
+    "You are a READ-ONLY portfolio analysis assistant. You NEVER place orders: the "
+    "user decides and executes manually in their broker. You receive the FULL "
+    "portfolio: each position with its weight %, configured verdict, unrealized "
+    "P&L vs the user's average cost, and fundamentals, plus cash per account. "
+    "Produce a COMPREHENSIVE REVIEW in English, using Markdown:\n"
+    "1) Thesis per position: one line per ticker stating whether the thesis STILL "
+    "HOLDS given its fundamentals and verdict, or should be revisited.\n"
+    "2) Concentration: flag heavy weights or relevant imbalances.\n"
+    "3) BUY ideas (positions with an intact thesis to add on dips) and SELL/TRIM "
+    "ideas. Respect the verdict: 'Mantener - no sumar' is NOT added to, 'Trim' is "
+    "reduced, 'Consolidar' is rotated out; 'Crecer'/'Mantener' are buy candidates.\n"
+    "4) Cash: what to do with the available cash per account.\n"
+    "Be concise but complete, use bullets, and start each position line with the "
+    "ticker. Do not invent data beyond the context; if a ticker is missing "
+    "fundamentals, say so. Keep the configured verdict labels verbatim.\n"
+    "CRITICAL: never describe trimming a LOSING position as 'taking profits'. "
+    "Use the P&L sign: a position in the red that must be reduced (Trim / "
+    "Consolidar) is exiting at a loss — say so plainly, and note the size of the "
+    "loss. Positions deep in the red with an intact thesis and a buy verdict may "
+    "be averaging-down candidates; positions deep in the red whose thesis broke "
+    "should be called out as such."
 )
 
 # Etiqueta legible de la acción a evaluar (deriva del veredicto / la señal).
@@ -97,23 +112,39 @@ def _format_dca(context: ReasoningContext) -> str:
     return ""
 
 
+def _format_position(context: ReasoningContext) -> str:
+    """P&L no realizado de la posición del usuario (o vacío si no hay dato).
+
+    Es la línea que evita el error de leer una suba de mercado como ganancia
+    propia: el movimiento es de la ventana, esto es contra el costo promedio.
+    """
+    pnl = context.unrealized_pct
+    if pnl is None or context.avg_cost is None:
+        return ""
+    estado = "EN GANANCIA" if pnl >= 0 else "EN PÉRDIDA"
+    return (
+        f"Mi posición: {estado} {pnl:+.1f}% vs costo promedio "
+        f"${context.avg_cost:.2f} (precio actual ${context.current_price:.2f})"
+    )
+
+
 def _action_label(context: ReasoningContext) -> str:
     return _ACTION_LABELS.get(context.action, context.action)
 
 
 def _review_user_prompt(context: PortfolioReviewContext) -> str:
-    """Prompt de usuario para la reevaluación integral (/reevaluar)."""
+    """User prompt for the comprehensive portfolio review (/reevaluar)."""
     lines = [
-        "Reevaluá esta cartera completa:",
+        "Review this full portfolio:",
         "",
-        f"Resumen: {context.position_count} posiciones · valor de mercado "
-        f"${context.total_value:,.0f} · cash disponible ${context.total_cash:,.0f}.",
+        f"Summary: {context.position_count} positions · market value "
+        f"${context.total_value:,.0f} · available cash ${context.total_cash:,.0f}.",
     ]
     if context.note:
-        lines.append(f"Concentración: {context.note}")
-    lines += ["", "Posiciones (peso · veredicto · fundamentals):", context.positions_block]
+        lines.append(f"Concentration: {context.note}")
+    lines += ["", "Positions (weight · verdict · fundamentals):", context.positions_block]
     if context.cash_block:
-        lines += ["", "Cash por cuenta:", context.cash_block]
+        lines += ["", "Cash per account:", context.cash_block]
     return "\n".join(lines)
 
 
@@ -127,20 +158,23 @@ _SIGNAL_HEADERS = {
 def _build_context_block(context: ReasoningContext) -> str:
     """Bloque de contexto que se le pasa al modelo (según el tipo de señal)."""
     if context.signal_kind in _SIGNAL_HEADERS:
-        return "\n".join([
+        lines = [
             f"Ticker: {context.ticker}",
             f"Veredicto configurado: {context.verdict}",
             f"Señal: {_SIGNAL_HEADERS[context.signal_kind]}",
             f"Detalle: {context.note}",
             f"Acción a evaluar: {_action_label(context)}",
+            _format_position(context),
             _format_fundamentals(context),
-        ])
+        ]
+        return "\n".join(line for line in lines if line)
     lines = [
         f"Ticker: {context.ticker}",
-        f"Movimiento: {context.pct_change:+.2f}% en una ventana de "
+        f"Movimiento del mercado: {context.pct_change:+.2f}% en una ventana de "
         f"{context.window_minutes} minutos",
         f"Precio: {context.current_price:.2f} (referencia {context.reference_price:.2f})",
         f"Veredicto configurado: {context.verdict}",
+        _format_position(context),
         f"Acción a evaluar: {_action_label(context)}",
         _format_fundamentals(context),
     ]
@@ -170,24 +204,26 @@ class TemplateReasoner:
             f"(ventana {context.window_minutes}m). Veredicto: {context.verdict}. "
             f"Acción: {_action_label(context)}."
         )
-        body = _format_fundamentals(context)
+        position = _format_position(context)
+        body = f"{position}. {_format_fundamentals(context)}" if position \
+            else _format_fundamentals(context)
         dca = _format_dca(context)
         if dca:
             body += f" {dca}."
         return Suggestion(text=f"{header} {body}", source="template")
 
     def review(self, context: PortfolioReviewContext) -> Suggestion:
-        """Reevaluación básica sin Claude: vuelca posiciones + cash tal cual."""
+        """Basic review without Claude: dumps positions + cash as-is."""
         lines = [
-            f"📊 Reevaluación del portfolio — {context.position_count} posiciones · "
+            f"📊 Portfolio review — {context.position_count} positions · "
             f"${context.total_value:,.0f} · cash ${context.total_cash:,.0f}",
         ]
         if context.note:
             lines.append(f"⚠️ {context.note}")
         lines += ["", context.positions_block]
         if context.cash_block:
-            lines += ["", "Cash por cuenta:", context.cash_block]
-        lines.append("\n(Sin Claude disponible: revisión automática básica.)")
+            lines += ["", "Cash per account:", context.cash_block]
+        lines.append("\n(Claude unavailable: basic automated review.)")
         return Suggestion(text="\n".join(lines), source="template")
 
 

@@ -24,7 +24,7 @@ from ..db.repositories import (
     UpcomingEarnings,
 )
 from ..logging import get_logger
-from ..reasoning import PortfolioReviewContext, ReasoningService
+from ..reasoning import PortfolioReviewContext, ReasoningService, ReviewPosition
 
 logger = get_logger(__name__)
 
@@ -34,10 +34,18 @@ _CONCENTRATION_PCT = 15.0
 _EARNINGS_HORIZON_DAYS = 21
 
 
+def _pnl_pct(price: float | None, avg_cost: float | None) -> float | None:
+    """P&L no realizado (%) contra el costo promedio, o None si falta el dato."""
+    if price is None or not avg_cost:
+        return None
+    return (price - avg_cost) / avg_cost * 100.0
+
+
 # ── Protocolos (testabilidad) ────────────────────────────────────────────────
 class HoldingsReader(Protocol):
     def verdicts_by_ticker(self) -> dict[str, str]: ...
     def shares_by_ticker(self) -> dict[str, float]: ...
+    def avg_cost_by_ticker(self) -> dict[str, float]: ...
 
 
 class PriceReader(Protocol):
@@ -94,39 +102,52 @@ class PortfolioReviewService:
 
     def review(self, now: datetime | None = None) -> str:
         """Devuelve el texto de la reevaluación integral (para el bot)."""
-        now = now or datetime.now(UTC)
-        context = self._build_context(now)
+        context = self.build_context(now)
         if context is None:
             return "Sin holdings cargados todavía (esperá el próximo sync de posiciones)."
+        return self.render_text(context)
+
+    def render_text(self, context: PortfolioReviewContext) -> str:
+        """Corre el reasoner sobre un contexto ya armado → texto del análisis."""
         return self._reasoner.review(context).text
 
     # ── Ensamblado del contexto ──────────────────────────────────────────────
-    def _build_context(self, now: datetime) -> PortfolioReviewContext | None:
+    def build_context(
+        self, now: datetime | None = None
+    ) -> PortfolioReviewContext | None:
+        """Arma el contexto de todo el portfolio (None si no hay holdings)."""
+        now = now or datetime.now(UTC)
         shares = self._holdings.shares_by_ticker()
         if not shares:
             return None
         verdicts = self._holdings.verdicts_by_ticker()
+        avg_costs = self._holdings.avg_cost_by_ticker()
         earnings_by_ticker = self._upcoming_earnings(now)
 
-        rows: list[tuple[str, float, float]] = []  # (ticker, shares, market_value)
+        rows: list[tuple[str, float, float | None]] = []  # (ticker, mv, pnl_pct)
         total = 0.0
         for ticker, sh in shares.items():
             price = self._prices.latest_price(ticker)
             mv = sh * price if price is not None else 0.0
             total += mv
-            rows.append((ticker, sh, mv))
-        rows.sort(key=lambda r: r[2], reverse=True)  # por valor de mercado desc
+            rows.append((ticker, mv, _pnl_pct(price, avg_costs.get(ticker))))
+        rows.sort(key=lambda r: r[1], reverse=True)  # por valor de mercado desc
 
-        lines: list[str] = []
+        positions: list[ReviewPosition] = []
         concentrated: list[str] = []
-        for ticker, _sh, mv in rows:
+        for ticker, mv, pnl in rows:
             weight = (mv / total * 100) if total else 0.0
             if weight >= _CONCENTRATION_PCT:
                 concentrated.append(f"{ticker} {weight:.0f}%")
-            lines.append(
-                self._position_line(
-                    ticker, weight, verdicts.get(ticker, "?"),
-                    earnings_by_ticker.get(ticker),
+            positions.append(
+                ReviewPosition(
+                    ticker=ticker,
+                    weight=weight,
+                    verdict=verdicts.get(ticker, "?"),
+                    market_value=mv,
+                    fundamentals_text=self._fundamentals_text(ticker),
+                    earnings=earnings_by_ticker.get(ticker),
+                    unrealized_pct=pnl,
                 )
             )
 
@@ -140,33 +161,40 @@ class PortfolioReviewService:
             if concentrated else None
         )
         return PortfolioReviewContext(
-            positions_block="\n".join(lines),
+            positions_block="\n".join(self._position_line(p) for p in positions),
             cash_block=cash_block,
             total_value=total,
             total_cash=total_cash,
-            position_count=len(rows),
+            position_count=len(positions),
             note=note,
+            positions=tuple(positions),
+            cash_accounts=tuple(
+                (r.name, r.available_funds, r.currency) for r in cash_rows
+            ),
         )
 
-    def _position_line(
-        self, ticker: str, weight: float, verdict: str, earnings: date | None
-    ) -> str:
+    def _position_line(self, p: ReviewPosition) -> str:
+        earn = f" · 📅 earnings {p.earnings:%d/%m}" if p.earnings else ""
+        pnl = f" · P&L {p.unrealized_pct:+.1f}%" if p.unrealized_pct is not None else ""
+        return (
+            f"• {p.ticker} {p.weight:.1f}% [{p.verdict}]{pnl} — "
+            f"{p.fundamentals_text}{earn}"
+        )
+
+    def _fundamentals_text(self, ticker: str) -> str:
         f = self._fundamentals.latest(ticker)
-        if f is not None:
-            parts = []
-            if f.pe is not None:
-                parts.append(f"P/E {f.pe:.1f}")
-            if f.revenue_growth is not None:
-                parts.append(f"crec {f.revenue_growth * 100:+.0f}%")
-            if f.gross_margin is not None:
-                parts.append(f"margen {f.gross_margin * 100:.0f}%")
-            if f.debt_to_equity is not None:
-                parts.append(f"D/E {f.debt_to_equity:.2f}")
-            fund = ", ".join(parts) if parts else "sin métricas"
-        else:
-            fund = "fundamentals no disponibles"
-        earn = f" · 📅 earnings {earnings:%d/%m}" if earnings else ""
-        return f"• {ticker} {weight:.1f}% [{verdict}] — {fund}{earn}"
+        if f is None:
+            return "fundamentals no disponibles"
+        parts = []
+        if f.pe is not None:
+            parts.append(f"P/E {f.pe:.1f}")
+        if f.revenue_growth is not None:
+            parts.append(f"crec {f.revenue_growth * 100:+.0f}%")
+        if f.gross_margin is not None:
+            parts.append(f"margen {f.gross_margin * 100:.0f}%")
+        if f.debt_to_equity is not None:
+            parts.append(f"D/E {f.debt_to_equity:.2f}")
+        return ", ".join(parts) if parts else "sin métricas"
 
     def _upcoming_earnings(self, now: datetime) -> dict[str, date]:
         rows = self._earnings.upcoming(
