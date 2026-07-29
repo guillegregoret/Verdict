@@ -11,6 +11,7 @@ from portfolio_monitor.db.repositories import FundamentalsRow
 from portfolio_monitor.market import BenchmarkMove, MarketSnapshot
 from portfolio_monitor.reasoning import (
     AnthropicReasoner,
+    ClusterExposure,
     PortfolioReviewContext,
     ReasoningContext,
     ReasoningError,
@@ -354,3 +355,19 @@ def test_review_prompt_includes_audit_flags() -> None:
     prompt = client.messages.last_kwargs["messages"][0]["content"]
     assert "Verdict audit" in prompt
     assert "veredicto de recorte pero P/E 17" in prompt
+
+
+def test_review_prompt_includes_cluster_exposure() -> None:
+    ctx = PortfolioReviewContext(
+        positions_block="• NVDA 12% [Mantener] — P/E 30",
+        cash_block="",
+        total_value=21000.0,
+        total_cash=3000.0,
+        position_count=1,
+        clusters=(ClusterExposure("Compute/GPU", 12.6, 2, -2.4),),
+    )
+    client = _FakeClient(_Resp([_Block("ok")]))
+    AnthropicReasoner(_settings(), client=client).review(ctx)
+    prompt = client.messages.last_kwargs["messages"][0]["content"]
+    assert "Exposure by cluster" in prompt
+    assert "Compute/GPU: 12.6%" in prompt

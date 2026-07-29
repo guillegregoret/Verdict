@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 
 import markdown as md
 
-from ..reasoning import PortfolioReviewContext, ReviewPosition
+from ..reasoning import ClusterExposure, PortfolioReviewContext, ReviewPosition
 
 _BRAND = "Gregoret Industries"
 _PRODUCT = "Verdict"
@@ -112,6 +112,7 @@ class PortfolioReportRenderer:
             self._header(now),
             self._tiles(context),
             self._audit(context.audit_flags),
+            self._clusters(context.clusters),
             self._allocation(context.positions),
             self._analysis(analysis_html),
             self._footer(now),
@@ -132,11 +133,17 @@ class PortfolioReportRenderer:
             audit = "\nVerdict audit:\n" + "\n".join(
                 f"  ⚠ {flag}" for flag in context.audit_flags
             ) + "\n"
+        clusters = ""
+        if context.clusters:
+            clusters = "\nExposure by cluster:\n" + "\n".join(
+                f"  {c.cluster}: {c.weight:.1f}% ({c.position_count} pos)"
+                for c in context.clusters
+            ) + "\n"
         return (
             f"{self._brand} · {_PRODUCT} — Portfolio Review ({now:%b %d, %Y})\n"
             f"Market value ${context.total_value:,.0f} · Cash "
             f"${context.total_cash:,.0f} · {context.position_count} positions{pnl}\n"
-            f"{audit}\n"
+            f"{audit}{clusters}\n"
             f"{analysis_markdown}\n"
         )
 
@@ -193,6 +200,36 @@ class PortfolioReportRenderer:
         return (
             "<table class='tiles' width='100%' cellpadding='0' cellspacing='0'>"
             f"<tr>{cells}</tr></table>{note}"
+        )
+
+    def _clusters(self, clusters: tuple[ClusterExposure, ...]) -> str:
+        """Sección de exposición por cluster (concentración temática, con barras)."""
+        if not clusters:
+            return ""
+        top = max((c.weight for c in clusters), default=0.0) or 1.0
+        rows = []
+        for c in clusters:
+            fill = max(2.0, c.weight / top * 100)
+            if c.unrealized_pct is None:
+                pnl = "<td class='wt'></td>"
+            else:
+                color = _GAIN if c.unrealized_pct >= 0 else _LOSS
+                pnl = f"<td class='wt' style='color:{color};'>{c.unrealized_pct:+.1f}%</td>"
+            rows.append(
+                "<tr class='arow'>"
+                f"<td class='tkr'>{html.escape(c.cluster)}</td>"
+                "<td class='barc'>"
+                f"<div class='bar'><div class='fill' style='width:{fill:.1f}%;"
+                f"background:linear-gradient(90deg,{_ACCENT_2},{_ACCENT});'></div></div>"
+                f"<div class='fund'>{c.position_count} positions</div></td>"
+                f"<td class='wt'>{c.weight:.1f}%</td>"
+                f"{pnl}</tr>"
+            )
+        return (
+            "<div class='sec'><div class='sectitle'>Exposure by Cluster</div>"
+            "<table class='alloc' width='100%' cellpadding='0' cellspacing='0'>"
+            + "".join(rows)
+            + "</table></div>"
         )
 
     def _audit(self, flags: tuple[str, ...]) -> str:

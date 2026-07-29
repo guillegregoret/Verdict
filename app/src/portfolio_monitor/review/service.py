@@ -25,7 +25,12 @@ from ..db.repositories import (
     UpcomingEarnings,
 )
 from ..logging import get_logger
-from ..reasoning import PortfolioReviewContext, ReasoningService, ReviewPosition
+from ..reasoning import (
+    ClusterExposure,
+    PortfolioReviewContext,
+    ReasoningService,
+    ReviewPosition,
+)
 
 logger = get_logger(__name__)
 
@@ -42,6 +47,42 @@ def _pnl_pct(price: float | None, avg_cost: float | None) -> float | None:
     if price is None or not avg_cost:
         return None
     return (price - avg_cost) / avg_cost * 100.0
+
+
+def _cluster_exposures(
+    positions: list[ReviewPosition], total: float
+) -> tuple[ClusterExposure, ...]:
+    """Agrega peso, conteo y P&L por cluster (ordenado por peso desc).
+
+    El P&L del cluster reconstruye el costo de cada posición desde su valor de
+    mercado y su P&L (mv / (1 + pnl)), igual que el total del portfolio. None si
+    ninguna posición del cluster tiene costo cargado.
+    """
+    acc: dict[str, dict[str, float]] = {}
+    for p in positions:
+        cluster = p.cluster or "Sin clasificar"
+        a = acc.setdefault(cluster, {"mv": 0.0, "count": 0, "cost": 0.0, "cost_mv": 0.0})
+        a["mv"] += p.market_value
+        a["count"] += 1
+        if p.unrealized_pct is not None:
+            factor = 1 + p.unrealized_pct / 100
+            if factor > 0:
+                a["cost"] += p.market_value / factor
+                a["cost_mv"] += p.market_value
+
+    out: list[ClusterExposure] = []
+    for cluster, a in acc.items():
+        pnl = (a["cost_mv"] - a["cost"]) / a["cost"] * 100 if a["cost"] else None
+        out.append(
+            ClusterExposure(
+                cluster=cluster,
+                weight=(a["mv"] / total * 100) if total else 0.0,
+                position_count=int(a["count"]),
+                unrealized_pct=pnl,
+            )
+        )
+    out.sort(key=lambda c: c.weight, reverse=True)
+    return tuple(out)
 
 
 def _fundamentals_text(f: FundamentalsRow | None) -> str:
@@ -66,6 +107,7 @@ class HoldingsReader(Protocol):
     def shares_by_ticker(self) -> dict[str, float]: ...
     def avg_cost_by_ticker(self) -> dict[str, float]: ...
     def target_pct_by_ticker(self) -> dict[str, float]: ...
+    def cluster_by_ticker(self) -> dict[str, str]: ...
 
 
 class PriceReader(Protocol):
@@ -143,6 +185,7 @@ class PortfolioReviewService:
         verdicts = self._holdings.verdicts_by_ticker()
         avg_costs = self._holdings.avg_cost_by_ticker()
         targets = self._holdings.target_pct_by_ticker()
+        clusters = self._holdings.cluster_by_ticker()
         earnings_by_ticker = self._upcoming_earnings(now)
 
         rows: list[tuple[str, float, float | None]] = []  # (ticker, mv, pnl_pct)
@@ -177,6 +220,7 @@ class PortfolioReviewService:
                     unrealized_pct=pnl,
                     audit=audit.issue if audit is not None else None,
                     target_pct=targets.get(ticker),
+                    cluster=clusters.get(ticker),
                 )
             )
 
@@ -201,15 +245,17 @@ class PortfolioReviewService:
                 (r.name, r.available_funds, r.currency) for r in cash_rows
             ),
             audit_flags=tuple(audit_flags),
+            clusters=_cluster_exposures(positions, total),
         )
 
     def _position_line(self, p: ReviewPosition) -> str:
         earn = f" · 📅 earnings {p.earnings:%d/%m}" if p.earnings else ""
         pnl = f" · P&L {p.unrealized_pct:+.1f}%" if p.unrealized_pct is not None else ""
         audit = f" · ⚠ {p.audit}" if p.audit else ""
+        cluster = f" · {p.cluster}" if p.cluster else ""
         return (
             f"• {p.ticker} {p.weight:.1f}%{self._target_text(p)} [{p.verdict}]{pnl} — "
-            f"{p.fundamentals_text}{earn}{audit}"
+            f"{p.fundamentals_text}{cluster}{earn}{audit}"
         )
 
     @staticmethod

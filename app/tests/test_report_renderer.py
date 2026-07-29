@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
-from portfolio_monitor.reasoning import PortfolioReviewContext, ReviewPosition
+from portfolio_monitor.reasoning import (
+    ClusterExposure,
+    PortfolioReviewContext,
+    ReviewPosition,
+)
 from portfolio_monitor.report import PortfolioReportRenderer
 
 NOW = datetime(2026, 7, 22, 14, 30, tzinfo=UTC)
@@ -27,6 +31,10 @@ def _context() -> PortfolioReviewContext:
         note="posiciones pesadas → NVDA 18%",
         positions=positions,
         audit_flags=("MU [Trim - tomar ganancias]: veredicto de recorte pero P/E 17",),
+        clusters=(
+            ClusterExposure("Compute/GPU", 24.0, 2, -3.1),
+            ClusterExposure("Salud", 6.0, 1, 4.2),
+        ),
     )
 
 
@@ -67,6 +75,19 @@ def test_html_shows_unrealized_pnl_per_position_and_total() -> None:
 def test_position_without_cost_renders_empty_pnl_cell() -> None:
     html = PortfolioReportRenderer().render_html(_context(), "x", now=NOW)
     assert "<td class='pnl'></td>" in html  # MU no tiene costo cargado
+
+
+def test_html_shows_cluster_exposure() -> None:
+    html = PortfolioReportRenderer().render_html(_context(), "x", now=NOW)
+    assert "Exposure by Cluster" in html
+    assert "Compute/GPU" in html
+    assert "24.0%" in html
+
+
+def test_text_version_includes_clusters() -> None:
+    txt = PortfolioReportRenderer().render_text(_context(), "body", now=NOW)
+    assert "Exposure by cluster" in txt
+    assert "Compute/GPU: 24.0%" in txt
 
 
 def test_html_shows_target_drift_when_material() -> None:

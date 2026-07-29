@@ -143,6 +143,7 @@ class ReviewPosition:
     unrealized_pct: float | None = None  # P&L no realizado vs mi costo promedio
     audit: str | None = None      # contradicción veredicto↔fundamentals (§ audit)
     target_pct: float | None = None  # peso objetivo del usuario (% del portfolio)
+    cluster: str | None = None    # tema/cluster (Compute/GPU, Power, Salud, …)
 
     @property
     def weight_drift(self) -> float | None:
@@ -150,6 +151,16 @@ class ReviewPosition:
         if self.target_pct is None:
             return None
         return self.weight - self.target_pct
+
+
+@dataclass(frozen=True)
+class ClusterExposure:
+    """Exposición del portfolio a un tema/cluster (concentración temática)."""
+
+    cluster: str
+    weight: float                    # % del portfolio por valor de mercado
+    position_count: int
+    unrealized_pct: float | None = None  # P&L no realizado del cluster (ponderado)
 
 
 @dataclass(frozen=True)
@@ -171,3 +182,4 @@ class PortfolioReviewContext:
     positions: tuple[ReviewPosition, ...] = field(default_factory=tuple)  # estructurado
     cash_accounts: tuple[tuple[str, float, str], ...] = field(default_factory=tuple)
     audit_flags: tuple[str, ...] = field(default_factory=tuple)  # veredictos que no cuadran
+    clusters: tuple[ClusterExposure, ...] = field(default_factory=tuple)  # concentración temática

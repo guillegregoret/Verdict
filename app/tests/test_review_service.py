@@ -22,11 +22,13 @@ class FakeHoldings:
         verdicts: dict[str, str],
         avg_costs: dict[str, float] | None = None,
         targets: dict[str, float] | None = None,
+        clusters: dict[str, str] | None = None,
     ) -> None:
         self._shares = shares
         self._verdicts = verdicts
         self._avg_costs = avg_costs or {}
         self._targets = targets or {}
+        self._clusters = clusters or {}
 
     def shares_by_ticker(self) -> dict[str, float]:
         return dict(self._shares)
@@ -39,6 +41,9 @@ class FakeHoldings:
 
     def target_pct_by_ticker(self) -> dict[str, float]:
         return dict(self._targets)
+
+    def cluster_by_ticker(self) -> dict[str, str]:
+        return dict(self._clusters)
 
 
 class FakePrices:
@@ -89,6 +94,7 @@ def _service(
     earnings: list[UpcomingEarnings] | None = None,
     avg_costs: dict[str, float] | None = None,
     targets: dict[str, float] | None = None,
+    clusters: dict[str, str] | None = None,
 ) -> PortfolioReviewService:
     return PortfolioReviewService(
         holdings=FakeHoldings(
@@ -96,6 +102,7 @@ def _service(
             {"NVDA": "Mantener", "GOOG": "Crecer"},
             avg_costs,
             targets,
+            clusters,
         ),
         prices=FakePrices(prices or {"NVDA": 200.0, "GOOG": 180.0}),
         fundamentals=FakeFundamentals(
@@ -206,6 +213,31 @@ def test_no_target_means_no_drift_text() -> None:
     _service(r).review(now=NOW)  # sin targets
     assert all(p.weight_drift is None for p in r.context.positions)
     assert "target" not in r.context.positions_block
+
+
+def test_cluster_exposure_is_aggregated() -> None:
+    # NVDA (4000) y GOOG (900) en clusters distintos → dos exposiciones.
+    r = FakeReasoner()
+    _service(
+        r,
+        avg_costs={"NVDA": 100.0, "GOOG": 200.0},  # NVDA verde, GOOG rojo
+        clusters={"NVDA": "Compute/GPU", "GOOG": "Hyperscaler"},
+    ).review(now=NOW)
+    by_cluster = {c.cluster: c for c in r.context.clusters}
+    assert set(by_cluster) == {"Compute/GPU", "Hyperscaler"}
+    # NVDA 4000/4900 ≈ 81.6% pesa más → primero (orden por peso desc)
+    assert r.context.clusters[0].cluster == "Compute/GPU"
+    assert round(by_cluster["Compute/GPU"].weight, 1) == 81.6
+    assert by_cluster["Compute/GPU"].position_count == 1
+    assert by_cluster["Compute/GPU"].unrealized_pct == 100.0  # 200 vs costo 100
+    line = [ln for ln in r.context.positions_block.splitlines() if "NVDA" in ln][0]
+    assert "Compute/GPU" in line  # el cluster va inline en la posición
+
+
+def test_unclassified_positions_grouped() -> None:
+    r = FakeReasoner()
+    _service(r).review(now=NOW)  # sin clusters → todo "Sin clasificar"
+    assert all(c.cluster == "Sin clasificar" for c in r.context.clusters)
 
 
 def test_no_holdings_returns_message_without_calling_reasoner() -> None:

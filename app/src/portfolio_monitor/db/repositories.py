@@ -296,6 +296,19 @@ class HoldingsRepository:
         with self._engine.connect() as conn:
             return {r.ticker: float(r.avg_cost) for r in conn.execute(stmt)}
 
+    def cluster_by_ticker(self) -> dict[str, str]:
+        """Mapa {ticker: cluster} (Compute/GPU, Power, Salud, …) para la exposición.
+
+        Un ticker vive en un solo cluster aunque esté en varias cuentas; se toma
+        cualquiera no nulo. Insumo de la concentración temática del /reevaluar.
+        """
+        stmt = text(
+            "SELECT ticker, max(cluster) AS cluster FROM holdings "
+            "WHERE cluster IS NOT NULL GROUP BY ticker"
+        )
+        with self._engine.connect() as conn:
+            return {r.ticker: r.cluster for r in conn.execute(stmt)}
+
     def target_pct_by_ticker(self) -> dict[str, float]:
         """Mapa {ticker: peso objetivo %} sobre el portfolio total (config del usuario).
 

@@ -56,7 +56,10 @@ _REVIEW_SYSTEM_PROMPT = (
     "2) Concentration: flag heavy weights or relevant imbalances. When a position "
     "shows a target weight, use the drift (current − target, in pp): materially "
     "BELOW target with an intact thesis and a buy verdict is a candidate to add; "
-    "materially ABOVE target is a candidate to trim toward target.\n"
+    "materially ABOVE target is a candidate to trim toward target. Also read the "
+    "'Exposure by cluster': single-ticker weights can look fine while a THEME "
+    "(e.g. AI/semis/power) dominates the book — call out thematic concentration "
+    "and correlated risk when one or a few clusters carry most of the portfolio.\n"
     "3) BUY ideas (positions with an intact thesis to add on dips) and SELL/TRIM "
     "ideas. Respect the verdict: 'Mantener - no sumar' is NOT added to, 'Trim' is "
     "reduced, 'Consolidar' is rotated out; 'Crecer'/'Mantener' are buy candidates.\n"
@@ -164,6 +167,11 @@ def _review_user_prompt(context: PortfolioReviewContext) -> str:
     ]
     if context.note:
         lines.append(f"Concentration: {context.note}")
+    if context.clusters:
+        lines += ["", "Exposure by cluster (thematic concentration):"]
+        for c in context.clusters:
+            pnl = f", P&L {c.unrealized_pct:+.1f}%" if c.unrealized_pct is not None else ""
+            lines.append(f"- {c.cluster}: {c.weight:.1f}% ({c.position_count} pos{pnl})")
     if context.audit_flags:
         lines += [
             "",

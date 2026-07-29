@@ -5,6 +5,7 @@ devuelve una Suggestion que consume el notifier (§11.7).
 """
 
 from .models import (
+    ClusterExposure,
     MonitorSignal,
     PortfolioReviewContext,
     ReasoningContext,
@@ -16,6 +17,7 @@ from .service import ReasoningService
 
 __all__ = [
     "AnthropicReasoner",
+    "ClusterExposure",
     "MonitorSignal",
     "PortfolioReviewContext",
     "Reasoner",
