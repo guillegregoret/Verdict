@@ -256,6 +256,13 @@ def test_anthropic_reasoner_missing_key_raises() -> None:
         AnthropicReasoner(Settings(_env_file=None, anthropic_api_key=""))
 
 
+def test_anthropic_client_uses_configured_retries() -> None:
+    # el 529 que tumbó un /reevaluar: el cliente ahora reintenta más veces.
+    s = Settings(_env_file=None, anthropic_api_key="sk-test", anthropic_max_retries=7)
+    reasoner = AnthropicReasoner(s)
+    assert reasoner._client.max_retries == 7
+
+
 # ── ReasoningService (fallback) ──────────────────────────────────────────────
 class _BoomReasoner:
     def generate(self, context: ReasoningContext) -> Suggestion:

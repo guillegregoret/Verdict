@@ -32,6 +32,7 @@ def test_allows_buy(verdict: str | None, expected: bool) -> None:
         ("Mantener", "drop", "comprar_dip"),
         ("Trim - tomar ganancias", "rise", "tomar_ganancias"),
         ("Consolidar", "rise", "consolidar"),
+        ("Objetivo (sin comprar)", "drop", "watchlist_dip"),
     ],
 )
 def test_trigger_rule_actionable(verdict: str, direction: str, action: str) -> None:
@@ -41,9 +42,14 @@ def test_trigger_rule_actionable(verdict: str, direction: str, action: str) -> N
     assert rule.action == action
 
 
+def test_watchlist_verdict_is_not_a_buy() -> None:
+    # 'Objetivo (sin comprar)' dispara por caída pero NO es compra: no lleva DCA.
+    assert allows_buy("Objetivo (sin comprar)") is False
+
+
 @pytest.mark.parametrize(
     "verdict",
-    ["Mantener - no sumar", "Objetivo (sin comprar)", "Migrar a UCITS", None, "x"],
+    ["Mantener - no sumar", "Migrar a UCITS", None, "x"],
 )
 def test_trigger_rule_non_actionable(verdict: str | None) -> None:
     assert trigger_rule(verdict) is None

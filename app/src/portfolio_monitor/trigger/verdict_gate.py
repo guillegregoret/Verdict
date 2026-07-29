@@ -6,9 +6,11 @@ dispara y qué acción sugerir.
 - `Crecer` / `Mantener`      → cae ≥ umbral  → sugerir **compra** en el dip.
 - `Trim - tomar ganancias`   → sube ≥ umbral → sugerir **tomar ganancias** (reducir).
 - `Consolidar`               → sube ≥ umbral → sugerir **consolidar / rotar**.
+- `Objetivo (sin comprar)`   → cae ≥ umbral  → avisar **oportunidad de entrada** en
+  la watchlist (target que seguís sin tener). Requiere que el ticker esté
+  habilitado y con precios (los europeos esperan EODHD, §13).
 
-El resto (`Mantener - no sumar`, `Objetivo (sin comprar)`, `Migrar a UCITS`,
-None) no dispara nada.
+El resto (`Mantener - no sumar`, `Migrar a UCITS`, None) no dispara nada.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ _RULES: dict[str, TriggerRule] = {
     "Mantener": TriggerRule("drop", "comprar_dip"),
     "Trim - tomar ganancias": TriggerRule("rise", "tomar_ganancias"),
     "Consolidar": TriggerRule("rise", "consolidar"),
+    "Objetivo (sin comprar)": TriggerRule("drop", "watchlist_dip"),
 }
 
 

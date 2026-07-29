@@ -86,6 +86,7 @@ _ACTION_LABELS = {
     "tomar_ganancias": "evaluar TOMAR GANANCIAS (reducir la posición)",
     "consolidar": "evaluar CONSOLIDAR / rotar la posición",
     "revisar_tesis": "REVISAR la tesis",
+    "watchlist_dip": "evaluar ENTRADA en la watchlist (target que seguís sin tener)",
 }
 
 
@@ -281,7 +282,10 @@ class AnthropicReasoner:
                 raise ReasoningError("ANTHROPIC_API_KEY no configurada.")
             from anthropic import Anthropic  # noqa: PLC0415
 
-            self._client = Anthropic(api_key=settings.anthropic_api_key)
+            self._client = Anthropic(
+                api_key=settings.anthropic_api_key,
+                max_retries=settings.anthropic_max_retries,
+            )
 
     def generate(self, context: ReasoningContext) -> Suggestion:
         user_prompt = (

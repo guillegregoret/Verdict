@@ -17,6 +17,11 @@ def setup_logging(level: str = "INFO") -> None:
         format="%(asctime)s %(levelname)-7s %(name)s | %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S%z",
     )
+    # httpx loguea a INFO la URL completa de cada request — y ahí viajan tokens en
+    # claro (?token=… de Finnhub, /bot<token>/ de Telegram). Se silencia a WARNING
+    # para que no queden secretos en `docker logs`.
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     _CONFIGURED = True
 
 

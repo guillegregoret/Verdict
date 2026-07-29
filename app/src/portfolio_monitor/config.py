@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     # ── Anthropic (razonamiento) ─────────────────────────────────────────────
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-opus-4-8"
+    # Reintentos del SDK ante 429/5xx/529 (overloaded). El default del SDK es 2 y
+    # con backoff corto perdimos un /reevaluar por un 529 puntual. Subimos el margen
+    # (el SDK aplica backoff exponencial con jitter); es una llamada, no un loop.
+    anthropic_max_retries: int = 5
 
     # ── Telegram (notificaciones) ────────────────────────────────────────────
     telegram_bot_token: str = ""
