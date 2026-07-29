@@ -13,7 +13,7 @@ NOW = datetime(2026, 7, 22, 14, 30, tzinfo=UTC)
 def _context() -> PortfolioReviewContext:
     positions = (
         ReviewPosition("NVDA", 18.0, "Mantener", 4140.0, "P/E 31.0, crec +70%",
-                       earnings=date(2026, 8, 4), unrealized_pct=12.0),
+                       earnings=date(2026, 8, 4), unrealized_pct=12.0, target_pct=12.0),
         ReviewPosition("GOOG", 6.0, "Crecer", 1380.0, "P/E 26.0, crec +17%",
                        unrealized_pct=-30.8),
         ReviewPosition("MU", 4.0, "Trim - tomar ganancias", 920.0, "P/E 21.0"),
@@ -67,6 +67,13 @@ def test_html_shows_unrealized_pnl_per_position_and_total() -> None:
 def test_position_without_cost_renders_empty_pnl_cell() -> None:
     html = PortfolioReportRenderer().render_html(_context(), "x", now=NOW)
     assert "<td class='pnl'></td>" in html  # MU no tiene costo cargado
+
+
+def test_html_shows_target_drift_when_material() -> None:
+    # NVDA 18.0% con target 12.0% → +6.0pp sobre target → se anota.
+    html = PortfolioReportRenderer().render_html(_context(), "x", now=NOW)
+    assert "target 12.0%" in html
+    assert "+6.0pp" in html
 
 
 def test_html_shows_verdict_audit_section() -> None:

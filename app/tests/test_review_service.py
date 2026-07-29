@@ -21,10 +21,12 @@ class FakeHoldings:
         shares: dict[str, float],
         verdicts: dict[str, str],
         avg_costs: dict[str, float] | None = None,
+        targets: dict[str, float] | None = None,
     ) -> None:
         self._shares = shares
         self._verdicts = verdicts
         self._avg_costs = avg_costs or {}
+        self._targets = targets or {}
 
     def shares_by_ticker(self) -> dict[str, float]:
         return dict(self._shares)
@@ -34,6 +36,9 @@ class FakeHoldings:
 
     def avg_cost_by_ticker(self) -> dict[str, float]:
         return dict(self._avg_costs)
+
+    def target_pct_by_ticker(self) -> dict[str, float]:
+        return dict(self._targets)
 
 
 class FakePrices:
@@ -83,12 +88,14 @@ def _service(
     prices: dict[str, float] | None = None,
     earnings: list[UpcomingEarnings] | None = None,
     avg_costs: dict[str, float] | None = None,
+    targets: dict[str, float] | None = None,
 ) -> PortfolioReviewService:
     return PortfolioReviewService(
         holdings=FakeHoldings(
             shares if shares is not None else {"NVDA": 20.0, "GOOG": 5.0},
             {"NVDA": "Mantener", "GOOG": "Crecer"},
             avg_costs,
+            targets,
         ),
         prices=FakePrices(prices or {"NVDA": 200.0, "GOOG": 180.0}),
         fundamentals=FakeFundamentals(
@@ -179,6 +186,26 @@ def test_no_audit_flag_when_verdict_matches_fundamentals() -> None:
     r = FakeReasoner()
     _service(r).review(now=NOW)  # NVDA Mantener +70% crec → sin contradicción
     assert r.context.audit_flags == ()
+
+
+def test_target_drift_is_computed_and_shown() -> None:
+    # NVDA vale 20*200=4000, GOOG 5*180=900, total 4900 → NVDA ~81.6%.
+    # target NVDA 70% → drift +11.6pp (sobreponderado); GOOG sin target → sin drift.
+    r = FakeReasoner()
+    _service(r, targets={"NVDA": 70.0}).review(now=NOW)
+    by_ticker = {p.ticker: p for p in r.context.positions}
+    assert round(by_ticker["NVDA"].weight_drift, 1) == 11.6
+    assert by_ticker["GOOG"].weight_drift is None
+    nvda_line = [ln for ln in r.context.positions_block.splitlines() if "NVDA" in ln][0]
+    assert "target 70.0%" in nvda_line
+    assert "↑ sobre target" in nvda_line  # drift > 2pp → marcado
+
+
+def test_no_target_means_no_drift_text() -> None:
+    r = FakeReasoner()
+    _service(r).review(now=NOW)  # sin targets
+    assert all(p.weight_drift is None for p in r.context.positions)
+    assert "target" not in r.context.positions_block
 
 
 def test_no_holdings_returns_message_without_calling_reasoner() -> None:

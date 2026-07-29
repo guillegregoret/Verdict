@@ -33,6 +33,8 @@ logger = get_logger(__name__)
 _CONCENTRATION_PCT = 15.0
 # Ventana para anotar earnings próximos junto a cada posición.
 _EARNINGS_HORIZON_DAYS = 21
+# Drift (pp) contra el target a partir del cual se anota "por encima/debajo" del objetivo.
+_DRIFT_MATERIAL_PP = 2.0
 
 
 def _pnl_pct(price: float | None, avg_cost: float | None) -> float | None:
@@ -63,6 +65,7 @@ class HoldingsReader(Protocol):
     def verdicts_by_ticker(self) -> dict[str, str]: ...
     def shares_by_ticker(self) -> dict[str, float]: ...
     def avg_cost_by_ticker(self) -> dict[str, float]: ...
+    def target_pct_by_ticker(self) -> dict[str, float]: ...
 
 
 class PriceReader(Protocol):
@@ -139,6 +142,7 @@ class PortfolioReviewService:
             return None
         verdicts = self._holdings.verdicts_by_ticker()
         avg_costs = self._holdings.avg_cost_by_ticker()
+        targets = self._holdings.target_pct_by_ticker()
         earnings_by_ticker = self._upcoming_earnings(now)
 
         rows: list[tuple[str, float, float | None]] = []  # (ticker, mv, pnl_pct)
@@ -172,6 +176,7 @@ class PortfolioReviewService:
                     earnings=earnings_by_ticker.get(ticker),
                     unrealized_pct=pnl,
                     audit=audit.issue if audit is not None else None,
+                    target_pct=targets.get(ticker),
                 )
             )
 
@@ -203,9 +208,20 @@ class PortfolioReviewService:
         pnl = f" · P&L {p.unrealized_pct:+.1f}%" if p.unrealized_pct is not None else ""
         audit = f" · ⚠ {p.audit}" if p.audit else ""
         return (
-            f"• {p.ticker} {p.weight:.1f}% [{p.verdict}]{pnl} — "
+            f"• {p.ticker} {p.weight:.1f}%{self._target_text(p)} [{p.verdict}]{pnl} — "
             f"{p.fundamentals_text}{earn}{audit}"
         )
+
+    @staticmethod
+    def _target_text(p: ReviewPosition) -> str:
+        """' (target X.X%, +Ypp)' — el drift contra el objetivo, si hay target."""
+        drift = p.weight_drift
+        if drift is None:
+            return ""
+        marker = ""
+        if abs(drift) >= _DRIFT_MATERIAL_PP:
+            marker = " ↑ sobre target" if drift > 0 else " ↓ bajo target"
+        return f" (target {p.target_pct:.1f}%, {drift:+.1f}pp{marker})"
 
     def _upcoming_earnings(self, now: datetime) -> dict[str, date]:
         rows = self._earnings.upcoming(

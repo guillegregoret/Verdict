@@ -296,6 +296,20 @@ class HoldingsRepository:
         with self._engine.connect() as conn:
             return {r.ticker: float(r.avg_cost) for r in conn.execute(stmt)}
 
+    def target_pct_by_ticker(self) -> dict[str, float]:
+        """Mapa {ticker: peso objetivo %} sobre el portfolio total (config del usuario).
+
+        Se suma entre cuentas (un ticker puede tener target en varias, ej: ISRG).
+        Sólo devuelve los tickers con target cargado; los null quedan afuera para
+        que el review no muestre drift de una posición sin objetivo definido.
+        """
+        stmt = text(
+            "SELECT ticker, sum(target_pct) AS target FROM holdings "
+            "WHERE target_pct IS NOT NULL GROUP BY ticker"
+        )
+        with self._engine.connect() as conn:
+            return {r.ticker: float(r.target) for r in conn.execute(stmt)}
+
     def account_by_ticker(self) -> dict[str, str]:
         """Mapa {ticker: ibkr_id} — qué cuenta tiene cada ticker (para el DCA, §5.4)."""
         stmt = text(

@@ -142,6 +142,14 @@ class ReviewPosition:
     earnings: date | None = None  # próximo earnings, si hay
     unrealized_pct: float | None = None  # P&L no realizado vs mi costo promedio
     audit: str | None = None      # contradicción veredicto↔fundamentals (§ audit)
+    target_pct: float | None = None  # peso objetivo del usuario (% del portfolio)
+
+    @property
+    def weight_drift(self) -> float | None:
+        """Peso actual − objetivo (pp). Positivo = sobreponderado; None sin target."""
+        if self.target_pct is None:
+            return None
+        return self.weight - self.target_pct
 
 
 @dataclass(frozen=True)

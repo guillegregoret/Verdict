@@ -62,6 +62,19 @@ def _total_unrealized_pct(positions: tuple[ReviewPosition, ...]) -> float | None
     return (value - cost) / cost * 100.0
 
 
+def _target_html(p: ReviewPosition) -> str:
+    """Anotación de drift contra el target, solo si es material (evita ruido)."""
+    drift = p.weight_drift
+    if drift is None or abs(drift) < 2.0:
+        return ""
+    color = _LOSS if drift > 0 else _ACCENT_2  # sobre target = recortar; bajo = sumar
+    arrow = "↑" if drift > 0 else "↓"
+    return (
+        f"<span class='drift' style='color:{color};'> · {arrow} target "
+        f"{p.target_pct:.1f}% ({drift:+.1f}pp)</span>"
+    )
+
+
 def _verdict_style(verdict: str) -> tuple[str, str]:
     key = verdict.strip().lower()
     for token, colors in _VERDICT_COLORS.items():
@@ -219,7 +232,8 @@ class PortfolioReportRenderer:
                 "<td class='barc'>"
                 f"<div class='bar'><div class='fill' style='width:{fill:.1f}%;"
                 f"background:linear-gradient(90deg,{_ACCENT_2},{_ACCENT});'></div></div>"
-                f"<div class='fund'>{html.escape(p.fundamentals_text)}{earn}</div>"
+                f"<div class='fund'>{html.escape(p.fundamentals_text)}{earn}"
+                f"{_target_html(p)}</div>"
                 "</td>"
                 f"<td class='wt'>{p.weight:.1f}%</td>"
                 f"{pnl}"
@@ -289,6 +303,7 @@ border:1px solid {_BORDER};}}
 .fill{{height:9px;border-radius:6px;}}
 .fund{{color:{_MUTED};font-size:11px;margin-top:4px;}}
 .earn{{color:{_ACCENT_2};margin-left:8px;}}
+.drift{{font-weight:600;}}
 .wt{{color:{_TEXT};font-size:13px;font-weight:600;text-align:right;width:48px;
 font-variant-numeric:tabular-nums;}}
 .pnl{{font-size:12px;font-weight:600;text-align:right;width:60px;
