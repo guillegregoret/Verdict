@@ -151,11 +151,18 @@ class FundamentalsMonitor:
                     f"{cur.gross_margin * 100:.1f}%"
                 )
 
-        if cur.debt_to_equity is not None and base.debt_to_equity is not None:
-            rise = cur.debt_to_equity - base.debt_to_equity
-            if rise >= s.fund_debt_rise:
+        if (
+            cur.debt_to_equity is not None
+            and base.debt_to_equity is not None
+            and base.debt_to_equity > 0
+        ):
+            abs_rise = cur.debt_to_equity - base.debt_to_equity
+            rel_rise = abs_rise / base.debt_to_equity
+            # Relativo (misma vara para toda escala) + piso absoluto (anti-ruido).
+            if rel_rise >= s.fund_debt_rise_pct and abs_rise >= s.fund_debt_rise_min:
                 reasons.append(
-                    f"deuda/equity {base.debt_to_equity:.2f} → {cur.debt_to_equity:.2f}"
+                    f"deuda/equity {base.debt_to_equity:.2f} → {cur.debt_to_equity:.2f} "
+                    f"({rel_rise * 100:+.0f}%)"
                 )
 
         return reasons

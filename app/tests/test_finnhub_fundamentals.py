@@ -49,6 +49,59 @@ def test_fetch_normalizes_percentages_to_fractions() -> None:
     assert f.raw["metric"]["peTTM"] == 31.5   # crudo preservado
 
 
+def test_robust_growth_overrides_ttm_artifact() -> None:
+    # ETN: TTM YoY -15% (one-off) contra 3Y +9.8% y 5Y +9.0% → usa el 3Y.
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"metric": {
+            "peTTM": 35.0,
+            "revenueGrowthTTMYoy": -15.08,
+            "revenueGrowth3Y": 9.77,
+            "revenueGrowth5Y": 8.98,
+        }})
+
+    f = _provider(handler).fetch("ETN")
+    assert f is not None
+    assert f.revenue_growth == pytest.approx(0.0977)  # 3Y, no el -15% distorsionado
+
+
+def test_robust_growth_keeps_strong_ttm_when_trend_agrees() -> None:
+    # MU: TTM +167% (real, recuperación de memoria) y 3Y/5Y positivos → mantiene TTM.
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"metric": {
+            "revenueGrowthTTMYoy": 166.98,
+            "revenueGrowth3Y": 6.71,
+            "revenueGrowth5Y": 11.76,
+        }})
+
+    f = _provider(handler).fetch("MU")
+    assert f is not None
+    assert f.revenue_growth == pytest.approx(1.6698)
+
+
+def test_debt_prefers_annual_over_quarterly() -> None:
+    # ABBV: trimestral 49.2 (equity chico) vs anual 20.2 → usa el anual, más estable.
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"metric": {
+            "totalDebt/totalEquityAnnual": 20.19,
+            "totalDebt/totalEquityQuarterly": 49.22,
+        }})
+
+    f = _provider(handler).fetch("ABBV")
+    assert f is not None
+    assert f.debt_to_equity == 20.19
+
+
+def test_debt_falls_back_to_quarterly_without_annual() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"metric": {
+            "totalDebt/totalEquityQuarterly": 0.56,
+        }})
+
+    f = _provider(handler).fetch("QCOM")
+    assert f is not None
+    assert f.debt_to_equity == 0.56
+
+
 def test_fetch_returns_none_when_no_metric() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"metric": {}})

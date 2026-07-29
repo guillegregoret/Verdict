@@ -60,7 +60,11 @@ class Settings(BaseSettings):
     # Umbrales de deterioro (en la escala de cada métrica):
     fund_revenue_growth_drop_pp: float = 15.0  # caída del crecimiento (puntos %)
     fund_margin_drop_pp: float = 5.0           # compresión del margen bruto (puntos %)
-    fund_debt_rise: float = 0.5                # salto de deuda/equity (ratio absoluto)
+    # Salto de deuda/equity: RELATIVO (un absoluto no significa nada entre escalas
+    # tan distintas — ABBV ~20 vs NVDA ~0.04). Dispara si sube ≥50% respecto del
+    # baseline Y además al menos +0.2 en absoluto (piso anti-ruido con base chica).
+    fund_debt_rise_pct: float = 0.5            # salto relativo de deuda/equity (50%)
+    fund_debt_rise_min: float = 0.2            # piso absoluto para evitar ruido
 
     # ── Earnings (§5 informativo) ────────────────────────────────────────────
     earnings_refresh_every_ticks: int = 1440  # refresca el calendario cada N ticks (0=off)

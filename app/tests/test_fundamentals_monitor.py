@@ -83,10 +83,24 @@ def test_revenue_growth_drop_triggers() -> None:
 
 def test_debt_spike_triggers() -> None:
     old = _row(NOW - timedelta(days=90), debt_to_equity=0.30)
-    new = _row(NOW, debt_to_equity=0.90)  # +0.60 ≥ 0.5
+    new = _row(NOW, debt_to_equity=0.90)  # +200% relativo y +0.60 absoluto
     events = _monitor({"NVDA": (new, old)}).evaluate(now=NOW)
     assert len(events) == 1
     assert any("deuda/equity" in r for r in events[0].reasons)
+
+
+def test_debt_high_base_small_relative_does_not_trigger() -> None:
+    # el fix ABBV: base 20 → 22 es +2.0 absoluto pero solo +10% relativo → no dispara.
+    old = _row(NOW - timedelta(days=90), debt_to_equity=20.0)
+    new = _row(NOW, debt_to_equity=22.0)
+    assert _monitor({"NVDA": (new, old)}).evaluate(now=NOW) == []
+
+
+def test_debt_small_absolute_does_not_trigger() -> None:
+    # base chica: 0.05 → 0.15 es +200% relativo pero solo +0.10 absoluto → no dispara.
+    old = _row(NOW - timedelta(days=90), debt_to_equity=0.05)
+    new = _row(NOW, debt_to_equity=0.15)
+    assert _monitor({"NVDA": (new, old)}).evaluate(now=NOW) == []
 
 
 def test_healthy_does_not_trigger() -> None:

@@ -101,6 +101,42 @@ def _pct_to_fraction(value: Any) -> float | None:
     return n / 100.0 if n is not None else None
 
 
+def _robust_growth(metric: dict[str, Any]) -> float | None:
+    """Crecimiento de ingresos robusto: TTM YoY salvo que contradiga la tendencia.
+
+    El TTM YoY es el estándar, pero un one-off (desinversión, cambio contable)
+    puede distorsionarlo: ETN marca -15% TTM contra +9.8% a 3 años y +9.0% a 5.
+    Cuando el TTM contradice EN SIGNO a los CAGR multi-año disponibles, se usa el
+    de 3 años (la tendencia durable). Si no hay TTM, cae al 3Y y luego al 5Y.
+    """
+    ttm = _pct_to_fraction(metric.get("revenueGrowthTTMYoy"))
+    cagr3 = _pct_to_fraction(metric.get("revenueGrowth3Y"))
+    cagr5 = _pct_to_fraction(metric.get("revenueGrowth5Y"))
+    fallback = cagr3 if cagr3 is not None else cagr5
+    if ttm is None:
+        return fallback
+    trend = [g for g in (cagr3, cagr5) if g is not None]
+    if trend and (
+        (ttm < 0 and all(g > 0 for g in trend))
+        or (ttm > 0 and all(g < 0 for g in trend))
+    ):
+        return fallback
+    return ttm
+
+
+def _debt_to_equity(metric: dict[str, Any]) -> float | None:
+    """Deuda/equity estable: prefiere el ANUAL (menos ruidoso que un trimestre).
+
+    El balance de un solo trimestre puede dar ratios extremos con equity chico
+    (ABBV: 49.2 trimestral vs 20.2 anual). El anual es más representativo para el
+    monitoreo de tesis (lento). Cae al trimestral si no hay anual.
+    """
+    annual = _num(metric.get("totalDebt/totalEquityAnnual"))
+    if annual is not None:
+        return annual
+    return _num(metric.get("totalDebt/totalEquityQuarterly"))
+
+
 class FinnhubFundamentalsProvider:
     """Provider de fundamentals sobre Finnhub `/stock/metric?metric=all` (§5.3).
 
@@ -141,9 +177,9 @@ class FinnhubFundamentalsProvider:
         return Fundamentals(
             ticker=ticker,
             pe=_num(metric.get("peTTM")),
-            revenue_growth=_pct_to_fraction(metric.get("revenueGrowthTTMYoy")),
+            revenue_growth=_robust_growth(metric),
             gross_margin=_pct_to_fraction(metric.get("grossMarginTTM")),
-            debt_to_equity=_num(metric.get("totalDebt/totalEquityQuarterly")),
+            debt_to_equity=_debt_to_equity(metric),
             raw={"metric": metric},
             source="finnhub",
         )
