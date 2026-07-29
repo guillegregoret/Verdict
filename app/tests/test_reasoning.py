@@ -8,6 +8,7 @@ import pytest
 
 from portfolio_monitor.config import Settings
 from portfolio_monitor.db.repositories import FundamentalsRow
+from portfolio_monitor.market import BenchmarkMove, MarketSnapshot
 from portfolio_monitor.reasoning import (
     AnthropicReasoner,
     PortfolioReviewContext,
@@ -40,6 +41,7 @@ def _context(
     verdict: str = "Mantener",
     action: str = "comprar_dip",
     avg_cost: float | None = None,
+    market: MarketSnapshot | None = None,
 ):
     return ReasoningContext(
         ticker="NVDA",
@@ -52,6 +54,7 @@ def _context(
         fundamentals=fundamentals,
         bucket_remaining=bucket,
         avg_cost=avg_cost,
+        market=market,
     )
 
 
@@ -139,12 +142,40 @@ def test_template_shows_loss_even_when_market_rose() -> None:
 def test_prompt_separates_market_move_from_my_position() -> None:
     ctx = _context(pct_change=4.5, verdict="Consolidar", avg_cost=252.84)
     block = _build_context_block(ctx)
-    assert "Movimiento del mercado: +4.50%" in block
+    assert "Movimiento del papel: +4.50%" in block
     assert "Mi posición: EN PÉRDIDA" in block
 
 
 def test_prompt_omits_position_line_without_cost() -> None:
     assert "Mi posición" not in _build_context_block(_context())
+
+
+def _market(
+    down: int = 15, total: int = 21, benchmarks: tuple = (("S&P 500", -1.8),)
+) -> MarketSnapshot:
+    return MarketSnapshot(
+        benchmarks=tuple(BenchmarkMove(label=lbl, pct_change=p) for lbl, p in benchmarks),
+        breadth_down=down,
+        breadth_total=total,
+        window_minutes=390,
+    )
+
+
+def test_prompt_includes_market_context_when_present() -> None:
+    # una caída acompañada por el mercado: el bloque lo tiene que decir.
+    block = _build_context_block(_context(pct_change=-3.0, market=_market()))
+    assert "Contexto de mercado: S&P 500 -1.8%" in block
+    assert "15/21 de mis posiciones en rojo" in block
+
+
+def test_prompt_omits_market_line_without_snapshot() -> None:
+    assert "Contexto de mercado" not in _build_context_block(_context())
+
+
+def test_template_shows_market_breadth() -> None:
+    s = TemplateReasoner().generate(_context(pct_change=-3.0, market=_market()))
+    assert "Contexto de mercado" in s.text
+    assert "15/21" in s.text
 
 
 def test_context_carries_action_from_event() -> None:

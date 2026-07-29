@@ -8,6 +8,7 @@ from portfolio_monitor.config import Settings
 from portfolio_monitor.db.repositories import FundamentalsRow
 from portfolio_monitor.dca import DcaSuggestion
 from portfolio_monitor.fundamentals import FundamentalsEvent
+from portfolio_monitor.market import BenchmarkMove, MarketSnapshot
 from portfolio_monitor.notifier import NotifierError
 from portfolio_monitor.reasoning import (
     MonitorSignal,
@@ -357,6 +358,56 @@ def test_missing_cost_basis_leaves_pnl_unknown() -> None:
     assert pipeline.run_once() == 1
     assert reasoning.contexts[0].avg_cost is None
     assert reasoning.contexts[0].unrealized_pct is None
+
+
+class FakeMarket:
+    """Provee un snapshot de mercado fijo (o None) para el pipeline."""
+
+    def __init__(self, snapshot: MarketSnapshot | None) -> None:
+        self._snapshot = snapshot
+
+    def snapshot(self) -> MarketSnapshot | None:
+        return self._snapshot
+
+
+def _snapshot() -> MarketSnapshot:
+    return MarketSnapshot(
+        benchmarks=(BenchmarkMove("S&P 500", -1.8),),
+        breadth_down=15,
+        breadth_total=21,
+        window_minutes=390,
+    )
+
+
+def test_market_snapshot_reaches_price_and_monitor_contexts() -> None:
+    # el mismo contexto de mercado se comparte por todas las señales del ciclo.
+    reasoning = FakeReasoning()
+    snap = _snapshot()
+    pipeline = AlertPipeline(
+        trigger=FakeTrigger([_event("NVDA")]),
+        fundamentals=FakeFundamentals(),
+        reasoning=reasoning,
+        notifier=FakeNotifier(),
+        alerts=FakeAlerts(),
+        monitors=[FakePostEarningsMonitor("GOOG")],
+        market=FakeMarket(snap),
+    )
+    assert pipeline.run_once() == 2
+    assert all(ctx.market is snap for ctx in reasoning.contexts)
+
+
+def test_pipeline_works_without_market_provider() -> None:
+    # market es opcional: sin provider, el contexto simplemente no lo trae.
+    reasoning = FakeReasoning()
+    pipeline = AlertPipeline(
+        trigger=FakeTrigger([_event("NVDA")]),
+        fundamentals=FakeFundamentals(),
+        reasoning=reasoning,
+        notifier=FakeNotifier(),
+        alerts=FakeAlerts(),
+    )
+    assert pipeline.run_once() == 1
+    assert reasoning.contexts[0].market is None
 
 
 def test_fundamentals_decay_event_is_alerted() -> None:

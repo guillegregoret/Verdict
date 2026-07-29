@@ -26,6 +26,7 @@ from ..db.repositories import (
 )
 from ..dca import DcaSuggestion
 from ..logging import get_logger
+from ..market import MarketContextService, MarketSnapshot
 from ..notifier import NotifierError
 from ..reasoning import (
     MonitorSignal,
@@ -64,6 +65,10 @@ class PriceReader(Protocol):
     def latest_price(self, ticker: str) -> float | None: ...
 
 
+class MarketProvider(Protocol):
+    def snapshot(self) -> MarketSnapshot | None: ...
+
+
 class SuggestionMaker(Protocol):
     def suggest(self, context: ReasoningContext) -> Suggestion: ...
 
@@ -99,6 +104,7 @@ class AlertPipeline:
         dca: DcaSizerLike | None = None,
         holdings: CostBasisReader | None = None,
         prices: PriceReader | None = None,
+        market: MarketProvider | None = None,
     ) -> None:
         self._trigger = trigger
         self._fundamentals = fundamentals
@@ -109,6 +115,7 @@ class AlertPipeline:
         self._dca = dca
         self._holdings = holdings
         self._prices = prices
+        self._market = market
 
     @classmethod
     def from_engine(
@@ -136,12 +143,14 @@ class AlertPipeline:
             dca=dca,
             holdings=HoldingsRepository(engine),
             prices=PriceRepository(engine),
+            market=MarketContextService.from_engine(engine),
         )
 
     def run_once(self) -> int:
         """Un ciclo. Devuelve cuántas alertas se enviaron."""
         sent = 0
         avg_costs = self._avg_costs()
+        market = self._market_snapshot()
 
         price_events = self._trigger.evaluate()
         for event in price_events:
@@ -156,6 +165,7 @@ class AlertPipeline:
                 bucket_remaining=dca.available_cash if dca else None,
                 dca_suggested_usd=dca.amount_usd if dca else None,
                 avg_cost=avg_costs.get(event.ticker),
+                market=market,
             )
             if self._dispatch(
                 context,
@@ -169,8 +179,13 @@ class AlertPipeline:
         for monitor in self._monitors:
             monitor_signals.extend(monitor.signals())
         for signal in monitor_signals:
+            enriched = self._with_position(
+                self._with_fundamentals(signal.context), avg_costs
+            )
+            if market is not None and enriched.market is None:
+                enriched = replace(enriched, market=market)
             if self._dispatch(
-                self._with_position(self._with_fundamentals(signal.context), avg_costs),
+                enriched,
                 trigger_type=signal.trigger_type,
                 pct_change=0.0,
                 window_minutes=0,
@@ -213,6 +228,12 @@ class AlertPipeline:
         except Exception as exc:  # noqa: BLE001 - best-effort
             logger.warning("Costos promedio no disponibles (%s); sigo sin ellos.", exc)
             return {}
+
+    def _market_snapshot(self) -> MarketSnapshot | None:
+        """Contexto de mercado del ciclo (una vez, compartido por todas las señales)."""
+        if self._market is None:
+            return None
+        return self._market.snapshot()  # ya es best-effort (devuelve None si falla)
 
     def _with_position(
         self, context: ReasoningContext, avg_costs: dict[str, float]

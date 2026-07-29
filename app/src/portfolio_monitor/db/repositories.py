@@ -75,6 +75,40 @@ class TickerConfigRepository:
             ]
 
 
+@dataclass(frozen=True)
+class Benchmark:
+    """Índice/ETF de referencia para el contexto de mercado (§ amplitud)."""
+
+    ticker: str
+    label: str            # nombre legible ("S&P 500")
+    kind: str             # 'index' | 'sector'
+
+
+class BenchmarksRepository:
+    """Lectura de los benchmarks habilitados (SPY/QQQ/SMH, …)."""
+
+    def __init__(self, engine: Engine) -> None:
+        self._engine = engine
+
+    def enabled(self) -> list[Benchmark]:
+        """Benchmarks habilitados, ordenados: primero índices, luego sectoriales."""
+        stmt = text(
+            "SELECT ticker, label, kind FROM benchmarks WHERE enabled = true "
+            "ORDER BY (kind = 'sector'), ticker"
+        )
+        with self._engine.connect() as conn:
+            return [
+                Benchmark(ticker=r.ticker, label=r.label, kind=r.kind)
+                for r in conn.execute(stmt)
+            ]
+
+    def enabled_tickers(self) -> list[str]:
+        """Solo los tickers (para que el poller los traiga junto con los holdings)."""
+        stmt = text("SELECT ticker FROM benchmarks WHERE enabled = true ORDER BY ticker")
+        with self._engine.connect() as conn:
+            return [r.ticker for r in conn.execute(stmt)]
+
+
 class PriceRepository:
     """Persistencia de la serie de precios."""
 

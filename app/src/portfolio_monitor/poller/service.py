@@ -15,6 +15,7 @@ from sqlalchemy import Engine
 from ..config import Settings
 from ..data.finnhub import FinnhubError, Quote
 from ..db.repositories import (
+    BenchmarksRepository,
     DataSourceHealthRepository,
     PricePoint,
     PriceRepository,
@@ -36,6 +37,10 @@ class TickerConfigReader(Protocol):
     def enabled_tickers(self) -> list[str]: ...
 
 
+class BenchmarkTickerReader(Protocol):
+    def enabled_tickers(self) -> list[str]: ...
+
+
 class PriceSink(Protocol):
     def insert_many(self, points: list[PricePoint]) -> int: ...
 
@@ -54,12 +59,14 @@ class PricePoller:
         ticker_config: TickerConfigReader,
         prices: PriceSink,
         health: HealthSink,
+        benchmarks: BenchmarkTickerReader | None = None,
     ) -> None:
         self._settings = settings
         self._quotes = quotes
         self._ticker_config = ticker_config
         self._prices = prices
         self._health = health
+        self._benchmarks = benchmarks
 
     @classmethod
     def from_engine(
@@ -75,6 +82,7 @@ class PricePoller:
             ticker_config=TickerConfigRepository(engine),
             prices=PriceRepository(engine),
             health=DataSourceHealthRepository(engine),
+            benchmarks=BenchmarksRepository(engine),
         )
 
     def poll_once(self) -> int:
@@ -83,6 +91,11 @@ class PricePoller:
         Un ticker que falla no aborta el barrido: se loguea y se sigue.
         """
         tickers = self._ticker_config.enabled_tickers()
+        # Los benchmarks (SPY/QQQ/SMH) se traen en el mismo barrido para alimentar
+        # el contexto de mercado; no son holdings ni disparan alertas. dict.fromkeys
+        # deduplica preservando el orden por si un benchmark ya estuviera habilitado.
+        if self._benchmarks is not None:
+            tickers = list(dict.fromkeys(tickers + self._benchmarks.enabled_tickers()))
         if not tickers:
             logger.warning("No hay tickers habilitados en ticker_config.")
             return 0

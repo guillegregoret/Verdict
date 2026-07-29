@@ -19,6 +19,14 @@ class FakeTickerConfig:
         return list(self._tickers)
 
 
+class FakeBenchmarks:
+    def __init__(self, tickers: Iterable[str]) -> None:
+        self._tickers = list(tickers)
+
+    def enabled_tickers(self) -> list[str]:
+        return list(self._tickers)
+
+
 class FakePrices:
     def __init__(self) -> None:
         self.inserted: list[PricePoint] = []
@@ -59,7 +67,7 @@ def _settings() -> Settings:
 
 
 def _poller(
-    quotes: FakeQuotes, tickers: list[str]
+    quotes: FakeQuotes, tickers: list[str], benchmarks: list[str] | None = None
 ) -> tuple[PricePoller, FakePrices, FakeHealth]:
     prices, health = FakePrices(), FakeHealth()
     poller = PricePoller(
@@ -68,6 +76,7 @@ def _poller(
         ticker_config=FakeTickerConfig(tickers),
         prices=prices,
         health=health,
+        benchmarks=FakeBenchmarks(benchmarks) if benchmarks is not None else None,
     )
     return poller, prices, health
 
@@ -108,3 +117,21 @@ def test_poll_once_no_enabled_tickers_is_noop() -> None:
     assert poller.poll_once() == 0
     assert prices.inserted == []
     assert health.records == []  # early return: no se registra salud
+
+
+def test_poll_once_includes_benchmarks() -> None:
+    # los benchmarks (SPY/QQQ) se traen en el mismo barrido que los holdings.
+    quotes = FakeQuotes({"NVDA": 100.0, "SPY": 500.0, "QQQ": 400.0})
+    poller, prices, _ = _poller(quotes, ["NVDA"], benchmarks=["SPY", "QQQ"])
+
+    assert poller.poll_once() == 3
+    assert {p.ticker for p in prices.inserted} == {"NVDA", "SPY", "QQQ"}
+
+
+def test_poll_once_dedupes_benchmark_already_enabled() -> None:
+    # si un benchmark ya estuviera habilitado como ticker, no se consulta dos veces.
+    quotes = FakeQuotes({"NVDA": 100.0, "SPY": 500.0})
+    poller, _, _ = _poller(quotes, ["NVDA", "SPY"], benchmarks=["SPY"])
+
+    assert poller.poll_once() == 2
+    assert quotes.calls == ["NVDA", "SPY"]

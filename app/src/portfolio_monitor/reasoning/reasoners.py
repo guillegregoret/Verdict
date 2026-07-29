@@ -36,7 +36,13 @@ _SYSTEM_PROMPT = (
     "veredicto es Trim/Consolidar, encuadralo como usar el rebote para salir "
     "(reducir la pérdida / rotar), aclarando que se vende en rojo. Y si la "
     "posición está en ganancia fuerte, decilo. Si no hay dato de posición, no "
-    "asumas ni ganancia ni pérdida."
+    "asumas ni ganancia ni pérdida.\n"
+    "CONTEXTO DE MERCADO — si viene, usalo para distinguir si el movimiento es "
+    "del activo o del mercado: cuando los benchmarks caen parecido y muchas de "
+    "mis posiciones están en rojo en la ventana, es una baja general (no un "
+    "deterioro propio del activo) y conviene decirlo; si el activo cae MUCHO más "
+    "que su índice/sector, el movimiento es idiosincrático y merece más cautela. "
+    "No lo inventes si no está."
 )
 
 _REVIEW_SYSTEM_PROMPT = (
@@ -128,6 +134,14 @@ def _format_position(context: ReasoningContext) -> str:
     )
 
 
+def _format_market(context: ReasoningContext) -> str:
+    """Línea de contexto de mercado (benchmarks + amplitud), o vacío si no hay."""
+    if context.market is None:
+        return ""
+    summary = context.market.summary()
+    return f"Contexto de mercado: {summary}" if summary else ""
+
+
 def _action_label(context: ReasoningContext) -> str:
     return _ACTION_LABELS.get(context.action, context.action)
 
@@ -165,16 +179,18 @@ def _build_context_block(context: ReasoningContext) -> str:
             f"Detalle: {context.note}",
             f"Acción a evaluar: {_action_label(context)}",
             _format_position(context),
+            _format_market(context),
             _format_fundamentals(context),
         ]
         return "\n".join(line for line in lines if line)
     lines = [
         f"Ticker: {context.ticker}",
-        f"Movimiento del mercado: {context.pct_change:+.2f}% en una ventana de "
+        f"Movimiento del papel: {context.pct_change:+.2f}% en una ventana de "
         f"{context.window_minutes} minutos",
         f"Precio: {context.current_price:.2f} (referencia {context.reference_price:.2f})",
         f"Veredicto configurado: {context.verdict}",
         _format_position(context),
+        _format_market(context),
         f"Acción a evaluar: {_action_label(context)}",
         _format_fundamentals(context),
     ]
@@ -207,6 +223,9 @@ class TemplateReasoner:
         position = _format_position(context)
         body = f"{position}. {_format_fundamentals(context)}" if position \
             else _format_fundamentals(context)
+        market = _format_market(context)
+        if market:
+            body += f" {market}."
         dca = _format_dca(context)
         if dca:
             body += f" {dca}."

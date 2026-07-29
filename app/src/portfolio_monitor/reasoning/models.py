@@ -7,6 +7,7 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 from ..db.repositories import FundamentalsRow
+from ..market.models import MarketSnapshot
 from ..trigger import TriggerEvent
 
 if TYPE_CHECKING:
@@ -37,6 +38,7 @@ class ReasoningContext:
     bucket_remaining: float | None = None   # cash disponible en la cuenta (§5.4)
     dca_suggested_usd: float | None = None  # monto de DCA sugerido en el dip (§5.4)
     avg_cost: float | None = None           # costo promedio por acción (mi posición)
+    market: MarketSnapshot | None = None    # contexto de mercado (benchmarks + amplitud)
 
     @property
     def unrealized_pct(self) -> float | None:
@@ -58,6 +60,7 @@ class ReasoningContext:
         bucket_remaining: float | None = None,
         dca_suggested_usd: float | None = None,
         avg_cost: float | None = None,
+        market: MarketSnapshot | None = None,
     ) -> ReasoningContext:
         """Contexto de una señal de precio a partir de un TriggerEvent (§11.4)."""
         return cls(
@@ -73,6 +76,7 @@ class ReasoningContext:
             bucket_remaining=bucket_remaining,
             dca_suggested_usd=dca_suggested_usd,
             avg_cost=avg_cost,
+            market=market,
         )
 
     @classmethod
