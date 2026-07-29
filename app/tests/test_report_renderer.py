@@ -26,6 +26,7 @@ def _context() -> PortfolioReviewContext:
         position_count=3,
         note="posiciones pesadas → NVDA 18%",
         positions=positions,
+        audit_flags=("MU [Trim - tomar ganancias]: veredicto de recorte pero P/E 17",),
     )
 
 
@@ -66,6 +67,32 @@ def test_html_shows_unrealized_pnl_per_position_and_total() -> None:
 def test_position_without_cost_renders_empty_pnl_cell() -> None:
     html = PortfolioReportRenderer().render_html(_context(), "x", now=NOW)
     assert "<td class='pnl'></td>" in html  # MU no tiene costo cargado
+
+
+def test_html_shows_verdict_audit_section() -> None:
+    html = PortfolioReportRenderer().render_html(_context(), "x", now=NOW)
+    assert "Verdict Audit" in html
+    assert "veredicto de recorte pero P/E 17" in html
+
+
+def test_text_version_includes_audit() -> None:
+    txt = PortfolioReportRenderer().render_text(_context(), "body", now=NOW)
+    assert "Verdict audit" in txt
+    assert "MU [Trim" in txt
+
+
+def test_no_audit_section_without_flags() -> None:
+    ctx = _context()
+    ctx = PortfolioReviewContext(
+        positions_block=ctx.positions_block,
+        cash_block=ctx.cash_block,
+        total_value=ctx.total_value,
+        total_cash=ctx.total_cash,
+        position_count=ctx.position_count,
+        positions=ctx.positions,
+    )
+    html = PortfolioReportRenderer().render_html(ctx, "x", now=NOW)
+    assert "Verdict Audit" not in html
 
 
 def test_markdown_analysis_is_converted() -> None:

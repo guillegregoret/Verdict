@@ -13,6 +13,7 @@ from typing import Protocol
 
 from sqlalchemy import Engine
 
+from ..audit import audit_verdict
 from ..db.repositories import (
     AccountCashRow,
     CashRepository,
@@ -39,6 +40,22 @@ def _pnl_pct(price: float | None, avg_cost: float | None) -> float | None:
     if price is None or not avg_cost:
         return None
     return (price - avg_cost) / avg_cost * 100.0
+
+
+def _fundamentals_text(f: FundamentalsRow | None) -> str:
+    """Resumen legible de fundamentals (P/E, crecimiento, margen, D/E)."""
+    if f is None:
+        return "fundamentals no disponibles"
+    parts = []
+    if f.pe is not None:
+        parts.append(f"P/E {f.pe:.1f}")
+    if f.revenue_growth is not None:
+        parts.append(f"crec {f.revenue_growth * 100:+.0f}%")
+    if f.gross_margin is not None:
+        parts.append(f"margen {f.gross_margin * 100:.0f}%")
+    if f.debt_to_equity is not None:
+        parts.append(f"D/E {f.debt_to_equity:.2f}")
+    return ", ".join(parts) if parts else "sin métricas"
 
 
 # ── Protocolos (testabilidad) ────────────────────────────────────────────────
@@ -135,19 +152,26 @@ class PortfolioReviewService:
 
         positions: list[ReviewPosition] = []
         concentrated: list[str] = []
+        audit_flags: list[str] = []
         for ticker, mv, pnl in rows:
             weight = (mv / total * 100) if total else 0.0
             if weight >= _CONCENTRATION_PCT:
                 concentrated.append(f"{ticker} {weight:.0f}%")
+            verdict = verdicts.get(ticker, "?")
+            fundamentals = self._fundamentals.latest(ticker)
+            audit = audit_verdict(ticker, verdict, fundamentals)
+            if audit is not None:
+                audit_flags.append(f"{audit.ticker} [{audit.verdict}]: {audit.issue}")
             positions.append(
                 ReviewPosition(
                     ticker=ticker,
                     weight=weight,
-                    verdict=verdicts.get(ticker, "?"),
+                    verdict=verdict,
                     market_value=mv,
-                    fundamentals_text=self._fundamentals_text(ticker),
+                    fundamentals_text=_fundamentals_text(fundamentals),
                     earnings=earnings_by_ticker.get(ticker),
                     unrealized_pct=pnl,
+                    audit=audit.issue if audit is not None else None,
                 )
             )
 
@@ -171,30 +195,17 @@ class PortfolioReviewService:
             cash_accounts=tuple(
                 (r.name, r.available_funds, r.currency) for r in cash_rows
             ),
+            audit_flags=tuple(audit_flags),
         )
 
     def _position_line(self, p: ReviewPosition) -> str:
         earn = f" · 📅 earnings {p.earnings:%d/%m}" if p.earnings else ""
         pnl = f" · P&L {p.unrealized_pct:+.1f}%" if p.unrealized_pct is not None else ""
+        audit = f" · ⚠ {p.audit}" if p.audit else ""
         return (
             f"• {p.ticker} {p.weight:.1f}% [{p.verdict}]{pnl} — "
-            f"{p.fundamentals_text}{earn}"
+            f"{p.fundamentals_text}{earn}{audit}"
         )
-
-    def _fundamentals_text(self, ticker: str) -> str:
-        f = self._fundamentals.latest(ticker)
-        if f is None:
-            return "fundamentals no disponibles"
-        parts = []
-        if f.pe is not None:
-            parts.append(f"P/E {f.pe:.1f}")
-        if f.revenue_growth is not None:
-            parts.append(f"crec {f.revenue_growth * 100:+.0f}%")
-        if f.gross_margin is not None:
-            parts.append(f"margen {f.gross_margin * 100:.0f}%")
-        if f.debt_to_equity is not None:
-            parts.append(f"D/E {f.debt_to_equity:.2f}")
-        return ", ".join(parts) if parts else "sin métricas"
 
     def _upcoming_earnings(self, now: datetime) -> dict[str, date]:
         rows = self._earnings.upcoming(

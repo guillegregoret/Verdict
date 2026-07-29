@@ -66,7 +66,12 @@ _REVIEW_SYSTEM_PROMPT = (
     "Consolidar) is exiting at a loss — say so plainly, and note the size of the "
     "loss. Positions deep in the red with an intact thesis and a buy verdict may "
     "be averaging-down candidates; positions deep in the red whose thesis broke "
-    "should be called out as such."
+    "should be called out as such.\n"
+    "VERDICT AUDIT: if the context lists a 'Verdict audit', those configured "
+    "verdicts contradict the fundamentals — the label is likely stale. Call it "
+    "out explicitly and suggest the user reconsider the verdict (e.g. a 'Trim' on "
+    "a cheap, fast-growing name whose thesis is intact is probably not a trim). "
+    "Do NOT blindly follow a verdict the audit flagged."
 )
 
 # Etiqueta legible de la acción a evaluar (deriva del veredicto / la señal).
@@ -156,6 +161,13 @@ def _review_user_prompt(context: PortfolioReviewContext) -> str:
     ]
     if context.note:
         lines.append(f"Concentration: {context.note}")
+    if context.audit_flags:
+        lines += [
+            "",
+            "Verdict audit — configured verdicts that CONTRADICT the fundamentals "
+            "(the label may be stale; weigh this):",
+            *(f"- {flag}" for flag in context.audit_flags),
+        ]
     lines += ["", "Positions (weight · verdict · fundamentals):", context.positions_block]
     if context.cash_block:
         lines += ["", "Cash per account:", context.cash_block]

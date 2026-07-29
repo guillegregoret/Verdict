@@ -154,6 +154,33 @@ def test_position_without_cost_has_no_pnl() -> None:
     assert "P&L" not in r.context.positions_block
 
 
+def test_verdict_audit_flags_contradiction() -> None:
+    # MU: Trim con P/E 17 y +167% de ingresos → el audit lo marca en el contexto.
+    r = FakeReasoner()
+    svc = PortfolioReviewService(
+        holdings=FakeHoldings({"MU": 2.0}, {"MU": "Trim - tomar ganancias"}),
+        prices=FakePrices({"MU": 700.0}),
+        fundamentals=FakeFundamentals(
+            {"MU": FundamentalsRow("MU", NOW, 17.4, 1.67, 0.73, 0.06)}
+        ),
+        cash=FakeCash([]),
+        earnings=FakeEarnings([]),
+        reasoner=r,
+    )
+    svc.review(now=NOW)
+    assert len(r.context.audit_flags) == 1
+    assert "MU" in r.context.audit_flags[0] and "recorte" in r.context.audit_flags[0]
+    mu = r.context.positions[0]
+    assert mu.audit is not None
+    assert "⚠" in r.context.positions_block  # el flag va inline en la línea
+
+
+def test_no_audit_flag_when_verdict_matches_fundamentals() -> None:
+    r = FakeReasoner()
+    _service(r).review(now=NOW)  # NVDA Mantener +70% crec → sin contradicción
+    assert r.context.audit_flags == ()
+
+
 def test_no_holdings_returns_message_without_calling_reasoner() -> None:
     r = FakeReasoner()
     out = _service(r, shares={}).review(now=NOW)

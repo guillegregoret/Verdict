@@ -141,6 +141,7 @@ class ReviewPosition:
     fundamentals_text: str        # resumen legible (o "fundamentals no disponibles")
     earnings: date | None = None  # próximo earnings, si hay
     unrealized_pct: float | None = None  # P&L no realizado vs mi costo promedio
+    audit: str | None = None      # contradicción veredicto↔fundamentals (§ audit)
 
 
 @dataclass(frozen=True)
@@ -161,3 +162,4 @@ class PortfolioReviewContext:
     note: str | None = None       # concentración / desbalances detectados
     positions: tuple[ReviewPosition, ...] = field(default_factory=tuple)  # estructurado
     cash_accounts: tuple[tuple[str, float, str], ...] = field(default_factory=tuple)
+    audit_flags: tuple[str, ...] = field(default_factory=tuple)  # veredictos que no cuadran

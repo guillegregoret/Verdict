@@ -338,3 +338,19 @@ def test_anthropic_review_builds_prompt_and_returns_text() -> None:
 def test_service_review_falls_back_on_error() -> None:
     svc = ReasoningService(primary=_BoomReasoner(), fallback=_OkReasoner("template"))
     assert svc.review(_review_context()).source == "template"
+
+
+def test_review_prompt_includes_audit_flags() -> None:
+    ctx = PortfolioReviewContext(
+        positions_block="• MU 5.5% [Trim - tomar ganancias] — P/E 17.4, crec +167%",
+        cash_block="",
+        total_value=21000.0,
+        total_cash=3000.0,
+        position_count=1,
+        audit_flags=("MU [Trim - tomar ganancias]: veredicto de recorte pero P/E 17",),
+    )
+    client = _FakeClient(_Resp([_Block("ok")]))
+    AnthropicReasoner(_settings(), client=client).review(ctx)
+    prompt = client.messages.last_kwargs["messages"][0]["content"]
+    assert "Verdict audit" in prompt
+    assert "veredicto de recorte pero P/E 17" in prompt

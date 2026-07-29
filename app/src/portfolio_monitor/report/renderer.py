@@ -98,6 +98,7 @@ class PortfolioReportRenderer:
             self._doc_open(),
             self._header(now),
             self._tiles(context),
+            self._audit(context.audit_flags),
             self._allocation(context.positions),
             self._analysis(analysis_html),
             self._footer(now),
@@ -113,10 +114,16 @@ class PortfolioReportRenderer:
         now = now or datetime.now(UTC)
         total_pnl = _total_unrealized_pct(context.positions)
         pnl = f" · P&L {total_pnl:+.1f}%" if total_pnl is not None else ""
+        audit = ""
+        if context.audit_flags:
+            audit = "\nVerdict audit:\n" + "\n".join(
+                f"  ⚠ {flag}" for flag in context.audit_flags
+            ) + "\n"
         return (
             f"{self._brand} · {_PRODUCT} — Portfolio Review ({now:%b %d, %Y})\n"
             f"Market value ${context.total_value:,.0f} · Cash "
-            f"${context.total_cash:,.0f} · {context.position_count} positions{pnl}\n\n"
+            f"${context.total_cash:,.0f} · {context.position_count} positions{pnl}\n"
+            f"{audit}\n"
             f"{analysis_markdown}\n"
         )
 
@@ -173,6 +180,16 @@ class PortfolioReportRenderer:
         return (
             "<table class='tiles' width='100%' cellpadding='0' cellspacing='0'>"
             f"<tr>{cells}</tr></table>{note}"
+        )
+
+    def _audit(self, flags: tuple[str, ...]) -> str:
+        """Sección de veredictos que contradicen los fundamentals (si hay)."""
+        if not flags:
+            return ""
+        items = "".join(f"<li>{html.escape(flag)}</li>" for flag in flags)
+        return (
+            "<div class='sec'><div class='sectitle'>Verdict Audit</div>"
+            f"<ul class='audit'>{items}</ul></div>"
         )
 
     def _allocation(self, positions: tuple[ReviewPosition, ...]) -> str:
@@ -258,6 +275,8 @@ border-bottom:1px solid {_BORDER};}}
 font-variant-numeric:tabular-nums;}}
 .concern{{color:#e7c14b;background:#241d08;padding:11px 16px;font-size:13px;
 border-bottom:1px solid {_BORDER};}}
+.audit{{margin:0;padding-left:20px;color:{_LOSS};font-size:13px;line-height:1.55;}}
+.audit li{{margin:6px 0;}}
 .sec{{padding:22px 28px;border-bottom:1px solid {_BORDER};}}
 .sectitle{{color:{_ACCENT};font-size:11px;letter-spacing:2px;text-transform:uppercase;
 margin-bottom:16px;}}
