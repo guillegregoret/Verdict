@@ -77,3 +77,17 @@ def test_disconnect_delegates() -> None:
     fake = FakeIB()
     IBKRClient(_settings(), ib=fake).disconnect()
     assert fake.disconnected is True
+
+
+def test_fetch_positions_times_out_instead_of_hanging() -> None:
+    # 🔴 regresión: sin timeout, reqPositionsAsync se colgaba y congelaba el
+    # scheduler cuando el gateway no tenía las posiciones listas.
+    class HangingIB(FakeIB):
+        async def reqPositionsAsync(self) -> list:
+            await asyncio.sleep(2.0)  # más que el timeout → wait_for corta
+            return []
+
+    s = Settings(_env_file=None, ib_gateway_timeout_seconds=0.05)
+    client = IBKRClient(s, ib=HangingIB())
+    with pytest.raises(IBKRError):
+        asyncio.run(client.fetch_positions())

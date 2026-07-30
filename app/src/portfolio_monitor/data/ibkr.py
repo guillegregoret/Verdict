@@ -9,6 +9,7 @@ del código y los tests no requieran la dependencia si inyectan un IB fake.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any
 
@@ -55,30 +56,45 @@ class IBKRClient:
 
             self._ib = IB()
 
+    @property
+    def _timeout(self) -> float:
+        return self._settings.ib_gateway_timeout_seconds
+
     async def connect(self) -> None:
-        """Conecta al gateway en modo READ-ONLY."""
+        """Conecta al gateway en modo READ-ONLY (con timeout duro)."""
         try:
-            await self._ib.connectAsync(
-                host=self._settings.ib_gateway_host,
-                port=self._settings.ib_gateway_port,
-                clientId=self._settings.ib_gateway_client_id,
-                readonly=True,  # 🔴 el cliente no puede enviar órdenes
+            await asyncio.wait_for(
+                self._ib.connectAsync(
+                    host=self._settings.ib_gateway_host,
+                    port=self._settings.ib_gateway_port,
+                    clientId=self._settings.ib_gateway_client_id,
+                    readonly=True,  # 🔴 el cliente no puede enviar órdenes
+                ),
+                timeout=self._timeout,
             )
-        except Exception as exc:  # noqa: BLE001 - normalizamos cualquier fallo
+        except Exception as exc:  # noqa: BLE001 - normalizamos
             raise IBKRError(f"No se pudo conectar al IB Gateway: {exc}") from exc
 
     async def fetch_positions(self) -> list[Position]:
-        """Trae las posiciones de todas las cuentas (read-only)."""
+        """Trae las posiciones de todas las cuentas (read-only, con timeout).
+
+        🔴 El timeout es crítico: sin él, si la suscripción de posiciones no está
+        lista, `reqPositionsAsync` se cuelga para siempre y congela el scheduler.
+        """
         try:
-            raw = await self._ib.reqPositionsAsync()
+            raw = await asyncio.wait_for(
+                self._ib.reqPositionsAsync(), timeout=self._timeout
+            )
         except Exception as exc:  # noqa: BLE001
             raise IBKRError(f"Fallo pidiendo posiciones: {exc}") from exc
         return [self._to_position(p) for p in raw]
 
     async def fetch_cash(self) -> list[AccountCash]:
-        """Trae el cash disponible por cuenta (accountSummary, read-only)."""
+        """Trae el cash disponible por cuenta (accountSummary, read-only, timeout)."""
         try:
-            raw = await self._ib.accountSummaryAsync()
+            raw = await asyncio.wait_for(
+                self._ib.accountSummaryAsync(), timeout=self._timeout
+            )
         except Exception as exc:  # noqa: BLE001
             raise IBKRError(f"Fallo pidiendo cash: {exc}") from exc
         return self._to_cash(raw)
