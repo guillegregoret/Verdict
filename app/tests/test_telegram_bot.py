@@ -123,10 +123,25 @@ class FakeReport:
         return self._text
 
 
-def _router(report: FakeReport | None = None) -> CommandRouter:
+class FakeSync:
+    def __init__(self, applied: int = 22, raises: bool = False) -> None:
+        self._applied = applied
+        self._raises = raises
+        self.calls = 0
+
+    def run_once(self) -> int:
+        self.calls += 1
+        if self._raises:
+            raise RuntimeError("gateway boom")
+        return self._applied
+
+
+def _router(
+    report: FakeReport | None = None, sync: FakeSync | None = None
+) -> CommandRouter:
     return CommandRouter(
         FakeCash(), FakeHoldings(), FakePrices(), FakeEarnings(), FakeFundamentals(),
-        report=report,
+        report=report, sync=sync,
     )
 
 
@@ -176,6 +191,30 @@ def test_router_reevaluar_routes_to_report() -> None:
 def test_router_reevaluar_without_service_is_graceful() -> None:
     out = _router(report=None).handle("/reevaluar")
     assert "no disponible" in out.lower()
+
+
+def test_router_reevaluar_syncs_before_report() -> None:
+    # /reevaluar a mano fuerza un sync fresco de IBKR antes de armar el reporte.
+    report = FakeReport("📧 report")
+    sync = FakeSync(applied=22)
+    out = _router(report=report, sync=sync).handle("/reevaluar", now=NOW)
+    assert sync.calls == 1
+    assert out == "📧 report"  # sync ok → sin aviso
+
+
+def test_router_reevaluar_warns_when_sync_fails() -> None:
+    # gateway caído: usa el último snapshot y antepone un aviso, no rompe.
+    report = FakeReport("📧 report")
+    sync = FakeSync(raises=True)
+    out = _router(report=report, sync=sync).handle("/reevaluar", now=NOW)
+    assert report.calls == 1  # el reporte igual se entrega
+    assert "No pude sincronizar" in out
+    assert "📧 report" in out
+
+
+def test_router_reevaluar_warns_when_gateway_returns_nothing() -> None:
+    out = _router(report=FakeReport(), sync=FakeSync(applied=0)).handle("/reevaluar")
+    assert "No pude sincronizar" in out
 
 
 def test_help_lists_reevaluar() -> None:

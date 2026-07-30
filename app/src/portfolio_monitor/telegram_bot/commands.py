@@ -22,13 +22,18 @@ from ..db.repositories import (
     PriceRepository,
     UpcomingEarnings,
 )
+from ..holdings import HoldingsSyncService
+from ..logging import get_logger
 from ..reasoning import ReasoningService
 from ..report import ReportService
+
+logger = get_logger(__name__)
 
 _HELP = (
     "Comandos:\n"
     "/status — resumen del portfolio y cash\n"
-    "/reevaluar — reevaluación integral: tesis, pesos, ideas (tarda ~30s)\n"
+    "/reevaluar — reevaluación integral: sincroniza con IBKR y arma tesis, "
+    "pesos, ideas (tarda ~30s)\n"
     "/cash — cash disponible por cuenta\n"
     "/earnings — próximos earnings (30 días)\n"
     "/<ticker> — detalle de un ticker (ej: /nvda)\n"
@@ -63,6 +68,10 @@ class ReportLike(Protocol):
     def deliver(self, now: datetime | None = ...) -> str: ...
 
 
+class SyncLike(Protocol):
+    def run_once(self) -> int: ...
+
+
 class CommandRouter:
     """Despacha comandos del bot a respuestas de texto (read-only)."""
 
@@ -74,6 +83,7 @@ class CommandRouter:
         earnings: EarningsReader,
         fundamentals: FundamentalsReader,
         report: ReportLike | None = None,
+        sync: SyncLike | None = None,
     ) -> None:
         self._cash = cash
         self._holdings = holdings
@@ -81,6 +91,7 @@ class CommandRouter:
         self._earnings = earnings
         self._fundamentals = fundamentals
         self._report = report
+        self._sync = sync
 
     @classmethod
     def from_engine(
@@ -89,6 +100,7 @@ class CommandRouter:
         reasoning: ReasoningService | None = None,
         settings: Settings | None = None,
     ) -> CommandRouter:
+        settings = settings or Settings()
         return cls(
             cash=CashRepository(engine),
             holdings=HoldingsRepository(engine),
@@ -96,10 +108,11 @@ class CommandRouter:
             earnings=EarningsRepository(engine),
             fundamentals=FundamentalsRepository(engine),
             report=(
-                ReportService.from_engine(engine, reasoning, settings or Settings())
+                ReportService.from_engine(engine, reasoning, settings)
                 if reasoning is not None
                 else None
             ),
+            sync=HoldingsSyncService.from_engine(settings, engine),
         )
 
     def handle(self, text: str, now: datetime | None = None) -> str:
@@ -113,7 +126,8 @@ class CommandRouter:
         if cmd in ("reevaluar", "review"):
             if self._report is None:
                 return "Reevaluación no disponible (falta configurar el reasoner)."
-            return self._report.deliver(now)
+            warning = self._refresh_holdings()
+            return warning + self._report.deliver(now)
         if cmd == "cash":
             return self._cash_report()
         if cmd == "earnings":
@@ -121,6 +135,27 @@ class CommandRouter:
         # /<ticker>
         detail = self._ticker(cmd.upper())
         return detail if detail is not None else f"No entendí «{cmd}». Probá /help."
+
+    def _refresh_holdings(self) -> str:
+        """Sync on-demand de posiciones/cash antes del reporte (best-effort).
+
+        `/reevaluar` a mano debe ver el estado actual, no el último sync periódico
+        (~30 min). Si el gateway no está disponible, se usa el último snapshot y se
+        antepone un aviso — nunca se rompe el reporte por esto.
+        """
+        if self._sync is None:
+            return ""
+        try:
+            applied = self._sync.run_once()
+        except Exception as exc:  # noqa: BLE001 - best-effort, no debe romper el reporte
+            logger.warning("Sync on-demand de /reevaluar falló (%s).", exc)
+            applied = 0
+        if applied <= 0:
+            return (
+                "⚠️ No pude sincronizar con IBKR ahora: uso el último snapshot "
+                "guardado (puede estar desactualizado).\n\n"
+            )
+        return ""
 
     # ── Reportes ─────────────────────────────────────────────────────────────
     def _cash_report(self) -> str:
