@@ -12,6 +12,7 @@ from typing import Protocol
 from sqlalchemy import Engine
 
 from ..config import Settings
+from ..data.ibc import GatewayControl, GatewayControlError
 from ..db.repositories import (
     AccountCashRow,
     CashRepository,
@@ -24,6 +25,7 @@ from ..db.repositories import (
 )
 from ..holdings import HoldingsSyncService
 from ..logging import get_logger
+from ..monitoring import HealthService
 from ..reasoning import ReasoningService
 from ..report import ReportService
 
@@ -36,6 +38,8 @@ _HELP = (
     "pesos, ideas (tarda ~30s)\n"
     "/cash — cash disponible por cuenta\n"
     "/earnings — próximos earnings (30 días)\n"
+    "/health — estado de componentes (DB, Finnhub, IBKR) y frescura de datos\n"
+    "/reconnect — pide al gateway re-loguearse a IBKR (te llega el 2FA al cel)\n"
     "/<ticker> — detalle de un ticker (ej: /nvda)\n"
     "/whoami — tu id de Telegram\n"
     "/help — esta ayuda"
@@ -72,6 +76,14 @@ class SyncLike(Protocol):
     def run_once(self) -> int: ...
 
 
+class HealthLike(Protocol):
+    def render(self, now: datetime | None = ...) -> str: ...
+
+
+class GatewayLike(Protocol):
+    def restart(self) -> str: ...
+
+
 class CommandRouter:
     """Despacha comandos del bot a respuestas de texto (read-only)."""
 
@@ -84,6 +96,8 @@ class CommandRouter:
         fundamentals: FundamentalsReader,
         report: ReportLike | None = None,
         sync: SyncLike | None = None,
+        health: HealthLike | None = None,
+        gateway: GatewayLike | None = None,
     ) -> None:
         self._cash = cash
         self._holdings = holdings
@@ -92,6 +106,8 @@ class CommandRouter:
         self._fundamentals = fundamentals
         self._report = report
         self._sync = sync
+        self._health = health
+        self._gateway = gateway
 
     @classmethod
     def from_engine(
@@ -113,6 +129,8 @@ class CommandRouter:
                 else None
             ),
             sync=HoldingsSyncService.from_engine(settings, engine),
+            health=HealthService(engine),
+            gateway=GatewayControl(settings),
         )
 
     def handle(self, text: str, now: datetime | None = None) -> str:
@@ -132,6 +150,12 @@ class CommandRouter:
             return self._cash_report()
         if cmd == "earnings":
             return self._earnings_report(now)
+        if cmd == "health":
+            if self._health is None:
+                return "Health no disponible."
+            return self._health.render(now)
+        if cmd == "reconnect":
+            return self._reconnect()
         # /<ticker>
         detail = self._ticker(cmd.upper())
         return detail if detail is not None else f"No entendí «{cmd}». Probá /help."
@@ -156,6 +180,25 @@ class CommandRouter:
                 "guardado (puede estar desactualizado).\n\n"
             )
         return ""
+
+    def _reconnect(self) -> str:
+        """Pide al gateway re-loguearse a IBKR (dispara el 2FA al celular)."""
+        if self._gateway is None:
+            return "Reconnect no disponible (gateway no configurado)."
+        try:
+            resp = self._gateway.restart()
+        except GatewayControlError as exc:
+            return (
+                f"⚠️ No pude pedirle al gateway que se reconecte: {exc}\n"
+                "Si el command server de IBC no está habilitado, reiniciá el "
+                "gateway a mano: `docker compose restart ib-gateway`."
+            )
+        return (
+            "🔄 Le pedí al gateway que se re-loguee a IBKR. Vas a recibir el push "
+            "de 2FA en tu celular — aprobalo y en ~1-2 min las posiciones y el cash "
+            "se sincronizan. Chequealo con /health.\n\n"
+            f"Respuesta del gateway: {resp}"
+        )
 
     # ── Reportes ─────────────────────────────────────────────────────────────
     def _cash_report(self) -> str:

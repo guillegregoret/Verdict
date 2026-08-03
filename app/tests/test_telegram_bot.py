@@ -221,6 +221,81 @@ def test_help_lists_reevaluar() -> None:
     assert "/reevaluar" in _router().handle("/help")
 
 
+class FakeHealth:
+    def __init__(self, text: str = "🩺 ok") -> None:
+        self._text = text
+        self.calls = 0
+
+    def render(self, now: datetime | None = None) -> str:
+        self.calls += 1
+        return self._text
+
+
+def test_router_health_routes_to_health_service() -> None:
+    health = FakeHealth("🩺 Estado de Verdict\n🟢 Base de datos")
+    router = CommandRouter(
+        FakeCash(), FakeHoldings(), FakePrices(), FakeEarnings(), FakeFundamentals(),
+        health=health,
+    )
+    out = router.handle("/health", now=NOW)
+    assert health.calls == 1
+    assert "Estado de Verdict" in out
+
+
+def test_router_health_without_service_is_graceful() -> None:
+    assert "no disponible" in _router().handle("/health").lower()
+
+
+def test_help_lists_health() -> None:
+    assert "/health" in _router().handle("/help")
+
+
+class FakeGateway:
+    def __init__(self, response: str = "OK", error: Exception | None = None) -> None:
+        self._response = response
+        self._error = error
+        self.calls = 0
+
+    def restart(self) -> str:
+        self.calls += 1
+        if self._error:
+            raise self._error
+        return self._response
+
+
+def test_router_reconnect_asks_gateway_to_restart() -> None:
+    gw = FakeGateway("OK restarting")
+    router = CommandRouter(
+        FakeCash(), FakeHoldings(), FakePrices(), FakeEarnings(), FakeFundamentals(),
+        gateway=gw,
+    )
+    out = router.handle("/reconnect", now=NOW)
+    assert gw.calls == 1
+    assert "2FA" in out
+    assert "OK restarting" in out
+
+
+def test_router_reconnect_reports_error_gracefully() -> None:
+    from portfolio_monitor.data.ibc import GatewayControlError
+
+    gw = FakeGateway(error=GatewayControlError("no está habilitado"))
+    router = CommandRouter(
+        FakeCash(), FakeHoldings(), FakePrices(), FakeEarnings(), FakeFundamentals(),
+        gateway=gw,
+    )
+    out = router.handle("/reconnect")
+    assert "No pude" in out
+    assert "docker compose restart ib-gateway" in out
+
+
+def test_router_reconnect_without_gateway_is_graceful() -> None:
+    assert "no disponible" in _router().handle("/reconnect").lower()
+
+
+def test_help_lists_reconnect() -> None:
+    assert "/reconnect" in _router().handle("/help")
+
+
 # ── Partido de mensajes largos ───────────────────────────────────────────────
 def test_split_message_short_is_single() -> None:
     assert _split_message("hola") == ["hola"]

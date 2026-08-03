@@ -60,8 +60,14 @@ services:
     # El gateway bindea 4001/4002 a localhost DEL contenedor; socat publica
     # 4003 (live) / 4004 (paper) hacia la red `internal`. La app usa 4004.
     # NUNCA publicar estos puertos al host público.
+    volumes:
+      # Habilita el command server de IBC (puerto 7462) para /reconnect: la app le
+      # manda RESTART y el gateway se re-loguea a IBKR (dispara el 2FA). Override
+      # del template de config (pineado a la imagen 10.48; re-sincronizar si se
+      # bumpea). El 7462 vive solo en la red `internal`, nunca se publica al host.
+      - ./gateway/config.ini.tmpl:/home/ibgateway/ibc/config.ini.tmpl:ro
     networks:
-      - internal                     # → app le habla la API por acá (4004)
+      - internal                     # → app le habla la API por acá (4004) + cmd 7462
       - egress                       # → IBKR auth + market data (gdc*.ibllc.com)
     security_opt:
       - no-new-privileges:true

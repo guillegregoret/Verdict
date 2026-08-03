@@ -144,6 +144,13 @@ class Settings(BaseSettings):
     # SIEMPRE y congela todo el scheduler (precios, alertas). Con timeout, el sync
     # falla best-effort y el loop sigue.
     ib_gateway_timeout_seconds: float = 20.0
+    # Command server de IBC (para /reconnect): la app le manda RESTART al gateway
+    # por la red interna → re-login a IBKR → push de 2FA al celular. NO usa el
+    # Docker socket (la app sigue con cap_drop ALL, §8/§12). Requiere habilitar el
+    # CommandServerPort en la config de IBC del gateway (ver docker-compose).
+    ib_gateway_command_enabled: bool = False
+    ib_gateway_command_host: str = "ib-gateway"  # = ib_gateway_host normalmente
+    ib_gateway_command_port: int = 7462
     # Cadencia del sync de holdings: 1 cada N ticks (las posiciones cambian lento;
     # no reconectar al gateway en cada barrido). 0 = deshabilitado. Además,
     # /reevaluar fuerza un sync on-demand para no depender de esta cadencia.
