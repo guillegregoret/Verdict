@@ -32,6 +32,19 @@ from ..report import ReportService
 
 logger = get_logger(__name__)
 
+# Menú de autocompletado de Telegram (setMyCommands): se registra al arrancar el
+# bot. /<ticker> (dinámico) y /whoami (bootstrap) quedan fuera del menú a propósito.
+BOT_COMMANDS: list[tuple[str, str]] = [
+    ("status", "Resumen del portfolio y cash"),
+    ("plan", "Plan de despliegue del cash disponible (DCA por cuenta)"),
+    ("reevaluar", "Reevaluación integral: tesis, pesos, ideas (~30s)"),
+    ("cash", "Cash disponible por cuenta"),
+    ("earnings", "Próximos earnings (30 días)"),
+    ("health", "Estado de componentes (DB, Finnhub, IBKR) y frescura de datos"),
+    ("reconnect", "Pedir al gateway re-loguearse a IBKR (llega el 2FA al cel)"),
+    ("help", "Ayuda"),
+]
+
 _HELP = (
     "Comandos:\n"
     "/status — resumen del portfolio y cash\n"

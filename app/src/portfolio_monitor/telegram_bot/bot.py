@@ -70,7 +70,11 @@ class TelegramBot:
     """Bot interactivo read-only con allowlist por user id (fail-closed)."""
 
     def __init__(
-        self, settings: Settings, router: Router, client: httpx.Client | None = None
+        self,
+        settings: Settings,
+        router: Router,
+        client: httpx.Client | None = None,
+        commands: list[tuple[str, str]] | None = None,
     ) -> None:
         self._token = settings.telegram_bot_token
         self._allowed = _parse_ids(settings.telegram_allowed_user_ids)
@@ -78,6 +82,7 @@ class TelegramBot:
         self._client = client or httpx.Client(
             base_url=settings.telegram_base_url, timeout=httpx.Timeout(45.0)
         )
+        self._commands = commands or []
         self._offset: int | None = None
         if not self._allowed:
             logger.warning(
@@ -133,9 +138,28 @@ class TelegramBot:
             logger.exception("Bot: error procesando %s", text)
             return chat_id, "Error procesando el comando."
 
+    def register_commands(self) -> None:
+        """Registra el menú de autocompletado en Telegram (setMyCommands).
+
+        Best-effort: un fallo no impide arrancar el bot. Mantiene el menú en sync
+        con el código en cada arranque, sin tocar @BotFather a mano.
+        """
+        if not self._commands:
+            return
+        payload = {
+            "commands": [{"command": c, "description": d} for c, d in self._commands]
+        }
+        try:
+            resp = self._client.post(f"/bot{self._token}/setMyCommands", json=payload)
+            resp.raise_for_status()
+            logger.info("Bot: %d comandos registrados en el menú.", len(self._commands))
+        except httpx.HTTPError as exc:
+            logger.warning("Bot: no pude registrar el menú de comandos (%s).", exc)
+
     def run_forever(self) -> None:
         """Loop de long-polling. Un fallo transitorio no tumba el bot."""
         logger.info("Bot Telegram arrancado (long-polling).")
+        self.register_commands()
         while True:
             try:
                 for update in self._get_updates():

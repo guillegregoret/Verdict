@@ -36,7 +36,7 @@ from .poller import PricePoller
 from .ratings import RatingsMonitor, RatingsService
 from .reasoning import AnthropicReasoner, ReasoningService, TemplateReasoner
 from .scheduler import AlertPipeline, Scheduler
-from .telegram_bot import CommandRouter, TelegramBot
+from .telegram_bot import BOT_COMMANDS, CommandRouter, TelegramBot
 
 logger = get_logger(__name__)
 
@@ -104,7 +104,9 @@ def main() -> None:
         # Bot interactivo /status (§5): thread daemon, long-polling, read-only.
         if settings.telegram_bot_enabled and settings.telegram_bot_token:
             bot = TelegramBot(
-                settings, CommandRouter.from_engine(engine, reasoning, settings)
+                settings,
+                CommandRouter.from_engine(engine, reasoning, settings),
+                commands=BOT_COMMANDS,
             )
             threading.Thread(
                 target=bot.run_forever, name="telegram-bot", daemon=True

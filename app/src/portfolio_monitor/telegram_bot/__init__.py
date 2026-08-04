@@ -5,6 +5,6 @@ Seguridad: long-polling (sin puertos abiertos), allowlist por user id personal
 """
 
 from .bot import TelegramBot
-from .commands import CommandRouter
+from .commands import BOT_COMMANDS, CommandRouter
 
-__all__ = ["CommandRouter", "TelegramBot"]
+__all__ = ["BOT_COMMANDS", "CommandRouter", "TelegramBot"]

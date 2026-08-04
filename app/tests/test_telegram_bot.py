@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, date, datetime
+
+import httpx
 
 from portfolio_monitor.config import Settings
 from portfolio_monitor.db.repositories import (
@@ -10,7 +13,7 @@ from portfolio_monitor.db.repositories import (
     FundamentalsRow,
     UpcomingEarnings,
 )
-from portfolio_monitor.telegram_bot import CommandRouter, TelegramBot
+from portfolio_monitor.telegram_bot import BOT_COMMANDS, CommandRouter, TelegramBot
 from portfolio_monitor.telegram_bot.bot import _parse_ids, _split_message
 
 NOW = datetime(2026, 7, 17, 12, 0, tzinfo=UTC)
@@ -77,6 +80,43 @@ def test_unauthorized_user_ignored_when_allowlist_set() -> None:
 
 def test_non_command_ignored() -> None:
     assert _bot(allowed="111").response_for(_update("hola", user_id=111)) is None
+
+
+def test_register_commands_posts_menu_to_telegram() -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["json"] = json.loads(request.content)
+        return httpx.Response(200, json={"ok": True})
+
+    client = httpx.Client(
+        transport=httpx.MockTransport(handler), base_url="https://api.telegram.org"
+    )
+    bot = TelegramBot(
+        Settings(_env_file=None, telegram_bot_token="TK"),
+        FakeRouter(), client=client, commands=BOT_COMMANDS,
+    )
+    bot.register_commands()
+
+    assert "setMyCommands" in captured["url"]
+    cmds = captured["json"]["commands"]
+    names = {c["command"] for c in cmds}
+    assert {"status", "plan", "health", "reconnect"} <= names
+    assert all(c["description"] for c in cmds)  # todas con descripción
+
+
+def test_register_commands_noop_without_commands() -> None:
+    # sin lista de comandos no hace ninguna llamada (no rompe si Telegram falla).
+    def handler(_: httpx.Request) -> httpx.Response:
+        raise AssertionError("no debería llamar a Telegram")
+
+    client = httpx.Client(
+        transport=httpx.MockTransport(handler), base_url="https://api.telegram.org"
+    )
+    TelegramBot(
+        Settings(_env_file=None, telegram_bot_token="TK"), FakeRouter(), client=client
+    ).register_commands()
 
 
 # ── CommandRouter ────────────────────────────────────────────────────────────
