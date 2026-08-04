@@ -271,6 +271,9 @@ class _BoomReasoner:
     def review(self, context: PortfolioReviewContext) -> Suggestion:
         raise ReasoningError("boom")
 
+    def plan(self, plan) -> Suggestion:  # noqa: ANN001
+        raise ReasoningError("boom")
+
 
 class _OkReasoner:
     def __init__(self, source: str) -> None:
@@ -281,6 +284,9 @@ class _OkReasoner:
 
     def review(self, context: PortfolioReviewContext) -> Suggestion:
         return Suggestion(text=f"review-{self._source}", source=self._source)
+
+    def plan(self, plan) -> Suggestion:  # noqa: ANN001
+        return Suggestion(text=f"plan-{self._source}", source=self._source)
 
 
 def test_service_uses_primary_when_ok() -> None:
@@ -346,6 +352,44 @@ def test_anthropic_review_builds_prompt_and_returns_text() -> None:
 def test_service_review_falls_back_on_error() -> None:
     svc = ReasoningService(primary=_BoomReasoner(), fallback=_OkReasoner("template"))
     assert svc.review(_review_context()).source == "template"
+
+
+# ── Planificador de cash (/plan) ─────────────────────────────────────────────
+def _deployment_plan():
+    from portfolio_monitor.planning import (
+        AccountPlan,
+        DeploymentCandidate,
+        DeploymentPlan,
+    )
+    cand = DeploymentCandidate(
+        ticker="GOOG", verdict="Crecer", weight=6.0, target_pct=9.0, gap_usd=300.0,
+        price=200.0, market_value=1200.0, unrealized_pct=10.5, cluster="Hyperscaler",
+        cluster_weight=7.1, pe=18.0, dip_threshold_pct=-3.4, tranche_usd=100.0,
+        suggested_usd=300.0,
+    )
+    acct = AccountPlan("Satélite IA", "U1", 1000.0, 200.0, 800.0, 300.0, (cand,))
+    return DeploymentPlan(1000.0, 800.0, 300.0, (acct,), targets_set=True)
+
+
+def test_template_plan_returns_deterministic() -> None:
+    s = TemplateReasoner().plan(_deployment_plan())
+    assert s.source == "template"
+    assert "Plan de despliegue de cash" in s.text
+    assert "GOOG" in s.text
+
+
+def test_anthropic_plan_builds_prompt_and_returns_text() -> None:
+    client = _FakeClient(_Resp([_Block("Desplegá primero en GOOG.")]))
+    s = AnthropicReasoner(_settings(), client=client).plan(_deployment_plan())
+    assert s == Suggestion(text="Desplegá primero en GOOG.", source="anthropic")
+    prompt = client.messages.last_kwargs["messages"][0]["content"]
+    assert "GOOG" in prompt and "desplegar ~$300" in prompt
+    assert client.messages.last_kwargs["system"]  # system prompt del plan
+
+
+def test_service_plan_falls_back_on_error() -> None:
+    svc = ReasoningService(primary=_BoomReasoner(), fallback=_OkReasoner("template"))
+    assert svc.plan(_deployment_plan()).source == "template"
 
 
 def test_review_prompt_includes_audit_flags() -> None:

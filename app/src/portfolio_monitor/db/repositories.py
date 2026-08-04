@@ -186,6 +186,20 @@ class PriceRepository:
         return float(row.p) if row and row.p is not None else None
 
 
+@dataclass(frozen=True)
+class HoldingPosition:
+    """Posición leída por cuenta con su config (insumo del planificador de cash)."""
+
+    ibkr_id: str
+    account_name: str
+    ticker: str
+    shares: float | None
+    avg_cost: float | None
+    verdict: str
+    target_pct: float | None
+    cluster: str | None
+
+
 class PositionLike(Protocol):
     """Forma estructural de una posición (evita acoplar db → data.ibkr)."""
 
@@ -295,6 +309,37 @@ class HoldingsRepository:
         )
         with self._engine.connect() as conn:
             return {r.ticker: float(r.avg_cost) for r in conn.execute(stmt)}
+
+    def positions(self) -> list[HoldingPosition]:
+        """Posiciones por cuenta con toda la config (para el planificador de cash).
+
+        Una fila por (cuenta, ticker) con shares/costo/veredicto/target/cluster. El
+        planificador la necesita para respetar que el cash de cada cuenta IBKR solo
+        compra posiciones DE esa cuenta.
+        """
+        stmt = text(
+            """
+            SELECT a.ibkr_id, a.name AS account_name, h.ticker, h.shares,
+                   h.avg_cost, h.verdict, h.target_pct, h.cluster
+            FROM holdings h JOIN accounts a ON a.id = h.account_id
+            WHERE a.ibkr_id IS NOT NULL
+            ORDER BY a.name, h.ticker
+            """
+        )
+        with self._engine.connect() as conn:
+            return [
+                HoldingPosition(
+                    ibkr_id=r.ibkr_id,
+                    account_name=r.account_name,
+                    ticker=r.ticker,
+                    shares=float(r.shares) if r.shares is not None else None,
+                    avg_cost=float(r.avg_cost) if r.avg_cost is not None else None,
+                    verdict=r.verdict,
+                    target_pct=float(r.target_pct) if r.target_pct is not None else None,
+                    cluster=r.cluster,
+                )
+                for r in conn.execute(stmt)
+            ]
 
     def cluster_by_ticker(self) -> dict[str, str]:
         """Mapa {ticker: cluster} (Compute/GPU, Power, Salud, …) para la exposición.

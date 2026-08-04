@@ -26,6 +26,7 @@ from ..db.repositories import (
 from ..holdings import HoldingsSyncService
 from ..logging import get_logger
 from ..monitoring import HealthService
+from ..planning import PlanService
 from ..reasoning import ReasoningService
 from ..report import ReportService
 
@@ -36,6 +37,7 @@ _HELP = (
     "/status — resumen del portfolio y cash\n"
     "/reevaluar — reevaluación integral: sincroniza con IBKR y arma tesis, "
     "pesos, ideas (tarda ~30s)\n"
+    "/plan — plan de despliegue del cash disponible (DCA por cuenta, con tramos)\n"
     "/cash — cash disponible por cuenta\n"
     "/earnings — próximos earnings (30 días)\n"
     "/health — estado de componentes (DB, Finnhub, IBKR) y frescura de datos\n"
@@ -84,6 +86,10 @@ class GatewayLike(Protocol):
     def restart(self) -> str: ...
 
 
+class PlanLike(Protocol):
+    def deliver(self, now: datetime | None = ...) -> str: ...
+
+
 class CommandRouter:
     """Despacha comandos del bot a respuestas de texto (read-only)."""
 
@@ -98,6 +104,7 @@ class CommandRouter:
         sync: SyncLike | None = None,
         health: HealthLike | None = None,
         gateway: GatewayLike | None = None,
+        plan: PlanLike | None = None,
     ) -> None:
         self._cash = cash
         self._holdings = holdings
@@ -108,6 +115,7 @@ class CommandRouter:
         self._sync = sync
         self._health = health
         self._gateway = gateway
+        self._plan = plan
 
     @classmethod
     def from_engine(
@@ -131,6 +139,11 @@ class CommandRouter:
             sync=HoldingsSyncService.from_engine(settings, engine),
             health=HealthService(engine),
             gateway=GatewayControl(settings),
+            plan=(
+                PlanService.from_engine(engine, reasoning, settings)
+                if reasoning is not None
+                else None
+            ),
         )
 
     def handle(self, text: str, now: datetime | None = None) -> str:
@@ -156,6 +169,10 @@ class CommandRouter:
             return self._health.render(now)
         if cmd == "reconnect":
             return self._reconnect()
+        if cmd in ("plan", "cash-plan"):
+            if self._plan is None:
+                return "Plan no disponible (falta configurar el reasoner)."
+            return self._refresh_holdings() + self._plan.deliver(now)
         # /<ticker>
         detail = self._ticker(cmd.upper())
         return detail if detail is not None else f"No entendí «{cmd}». Probá /help."

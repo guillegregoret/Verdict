@@ -91,6 +91,14 @@ class Settings(BaseSettings):
     dca_max_multiplier: float = 2.0         # tope del factor por profundidad del dip
     dca_dip_slope: float = 0.1              # +multiplicador por cada 1% de caída
 
+    # ── Planificador de despliegue de cash (/plan) ────────────────────────────
+    # Reserva que NO se despliega (colchón para dips más profundos / imprevistos):
+    # se guarda el máximo entre un % del cash de la cuenta y un piso absoluto.
+    cash_reserve_pct: float = 0.15          # 15% del cash de la cuenta queda de reserva
+    cash_reserve_floor_usd: float = 200.0   # …o al menos este piso, lo que sea mayor
+    # Nº de tramos en que se sugiere trocear cada despliegue (DCA escalonado).
+    cash_plan_tranches: int = 3
+
     # ── Anthropic (razonamiento) ─────────────────────────────────────────────
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-opus-4-8"

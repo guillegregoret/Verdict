@@ -296,6 +296,35 @@ def test_help_lists_reconnect() -> None:
     assert "/reconnect" in _router().handle("/help")
 
 
+class FakePlan:
+    def __init__(self, text: str = "💸 plan") -> None:
+        self._text = text
+        self.calls = 0
+
+    def deliver(self, now: datetime | None = None) -> str:
+        self.calls += 1
+        return self._text
+
+
+def test_router_plan_routes_to_plan_service() -> None:
+    plan = FakePlan("💸 Plan de despliegue")
+    router = CommandRouter(
+        FakeCash(), FakeHoldings(), FakePrices(), FakeEarnings(), FakeFundamentals(),
+        plan=plan,
+    )
+    out = router.handle("/plan", now=NOW)
+    assert plan.calls == 1
+    assert "Plan de despliegue" in out
+
+
+def test_router_plan_without_service_is_graceful() -> None:
+    assert "no disponible" in _router().handle("/plan").lower()
+
+
+def test_help_lists_plan() -> None:
+    assert "/plan" in _router().handle("/help")
+
+
 # ── Partido de mensajes largos ───────────────────────────────────────────────
 def test_split_message_short_is_single() -> None:
     assert _split_message("hola") == ["hola"]

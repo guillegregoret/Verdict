@@ -7,6 +7,7 @@ igual salga. El notifier (§11.7) consume la Suggestion resultante.
 from __future__ import annotations
 
 from ..logging import get_logger
+from ..planning.models import DeploymentPlan
 from .models import PortfolioReviewContext, ReasoningContext, Suggestion
 from .reasoners import Reasoner, ReasoningError
 
@@ -46,3 +47,16 @@ class ReasoningService:
                 exc,
             )
             return self._fallback.review(context)
+
+    def plan(self, plan: DeploymentPlan) -> Suggestion:
+        """Prioriza el plan de despliegue de cash; cae al fallback si el primario falla."""
+        try:
+            return self._primary.plan(plan)
+        except ReasoningError as exc:
+            if self._fallback is None:
+                raise
+            logger.warning(
+                "Reasoner primario falló en el plan de cash (%s); usando fallback.",
+                exc,
+            )
+            return self._fallback.plan(plan)

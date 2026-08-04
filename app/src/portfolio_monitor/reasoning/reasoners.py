@@ -12,6 +12,8 @@ from typing import Any, Protocol
 
 from ..config import Settings
 from ..logging import get_logger
+from ..planning.format import format_plan
+from ..planning.models import DeploymentPlan
 from .models import PortfolioReviewContext, ReasoningContext, Suggestion
 
 logger = get_logger(__name__)
@@ -80,6 +82,24 @@ _REVIEW_SYSTEM_PROMPT = (
     "Do NOT blindly follow a verdict the audit flagged."
 )
 
+_PLAN_SYSTEM_PROMPT = (
+    "Sos un estratega READ-ONLY de despliegue de cash. NUNCA ejecutás órdenes: "
+    "preparás una recomendación para que el usuario decida y ejecute en su broker. "
+    "Recibís un PLAN DETERMINÍSTICO ya calculado: cash por cuenta (el cash NO cruza "
+    "cuentas), y candidatos con veredicto de compra (peso actual, target, gap-a-"
+    "target en $, valuación P/E, P&L, cluster y su peso, tramos y gatillo de caída). "
+    "Tu tarea es PRIORIZAR y explicar, en español rioplatense, conciso y accionable:\n"
+    "1) En qué orden desplegar y por qué (gap a target, valuación, tesis).\n"
+    "2) CONCENTRACIÓN: si un cluster ya pesa mucho (ej: el complejo AI/semis/power), "
+    "avisá y sugerí no agrandar esa apuesta; preferí lo infraponderado.\n"
+    "3) Cuánto cash conviene RETENER como colchón (no desplegar todo de golpe).\n"
+    "4) Si el plan dice que los targets = peso actual (sin señal de rebalanceo), "
+    "decílo, priorizá por convicción (tesis + valuación + cluster infraponderado) y "
+    "recomendá cargar targets reales para afinar.\n"
+    "No inventes números fuera del plan. No es un consejo de inversión ni una orden: "
+    "es soporte de decisión; el usuario ejecuta. Respetá los montos y las cuentas."
+)
+
 # Etiqueta legible de la acción a evaluar (deriva del veredicto / la señal).
 _ACTION_LABELS = {
     "comprar_dip": "evaluar SUMAR en la caída",
@@ -97,6 +117,15 @@ class ReasoningError(RuntimeError):
 class Reasoner(Protocol):
     def generate(self, context: ReasoningContext) -> Suggestion: ...
     def review(self, context: PortfolioReviewContext) -> Suggestion: ...
+    def plan(self, plan: DeploymentPlan) -> Suggestion: ...
+
+
+def _plan_user_prompt(plan: DeploymentPlan) -> str:
+    """User prompt del planificador: el plan determinístico + pedido de prioridad."""
+    return (
+        "Priorizá este plan de despliegue de cash (qué desplegar primero, "
+        "concentración a cuidar, cuánto retener):\n\n" + format_plan(plan)
+    )
 
 
 def _format_fundamentals(context: ReasoningContext) -> str:
@@ -269,6 +298,10 @@ class TemplateReasoner:
         lines.append("\n(Claude unavailable: basic automated review.)")
         return Suggestion(text="\n".join(lines), source="template")
 
+    def plan(self, plan: DeploymentPlan) -> Suggestion:
+        """Sin Claude: devuelve el plan determinístico tal cual (ya es accionable)."""
+        return Suggestion(text=format_plan(plan), source="template")
+
 
 class AnthropicReasoner:
     """Genera la sugerencia con Claude (Anthropic Messages API)."""
@@ -330,6 +363,30 @@ class AnthropicReasoner:
 
         if getattr(resp, "stop_reason", None) == "refusal":
             raise ReasoningError("Anthropic rechazó la reevaluación del portfolio.")
+
+        text = "".join(
+            block.text
+            for block in resp.content
+            if getattr(block, "type", None) == "text"
+        ).strip()
+        if not text:
+            raise ReasoningError("Respuesta vacía de Anthropic.")
+        return Suggestion(text=text, source="anthropic")
+
+    def plan(self, plan: DeploymentPlan) -> Suggestion:
+        """Prioriza el plan de despliegue de cash con Claude (/plan)."""
+        try:
+            resp = self._client.messages.create(
+                model=self._settings.anthropic_model,
+                max_tokens=1500,
+                system=_PLAN_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": _plan_user_prompt(plan)}],
+            )
+        except Exception as exc:  # noqa: BLE001 - normalizamos errores del SDK
+            raise ReasoningError(f"Fallo llamando a Anthropic: {exc}") from exc
+
+        if getattr(resp, "stop_reason", None) == "refusal":
+            raise ReasoningError("Anthropic rechazó el plan de despliegue.")
 
         text = "".join(
             block.text
