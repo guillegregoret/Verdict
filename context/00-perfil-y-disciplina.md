@@ -32,8 +32,13 @@ por el inversor.
    "recuperar").
 4. **DCA** en nombres de convicción, gatillado por pullbacks a soporte, no por fecha
    fija.
-5. **Tomar ganancias solo cuando está MUY verde (>50% no realizado).** Por debajo,
-   dejar correr.
+5. **Tomar ganancias es discrecional, no mecánico.** El ~50% no realizado es una
+   *referencia* para los nombres de alta beta del sleeve IA (varios hicieron +100% en
+   su momento) —no una ley universal ni el mismo umbral para todo el libro—. Pesá
+   **cómo llegó la ganancia y en cuánto tiempo**: un +50% vertical en pocas semanas
+   (impulso/sentimiento) es más candidato a recortar *en la fuerza* que un +50%
+   construido en años con la tesis componiendo, que se deja correr. Ajustá el umbral
+   al carácter del nombre y a la velocidad del movimiento; en la duda, dejar correr.
 6. **Entrar en debilidad / consolidación**, no perseguir movimientos verticales.
 
 ## Marcos de decisión
@@ -54,7 +59,11 @@ a "reconsiderar".
   que pese (cortar la cola larga).
 - Sumar a un ganador ya grande profundiza convicción pero sube concentración +
   correlación — marcá el tradeoff.
-- Recortar solo con **>50% verde**.
+- Recortar es **discrecional**: el ~50% verde es una referencia para los nombres de
+  alta beta (IA), no un umbral único para todo el libro. Pesá la **velocidad** del
+  movimiento (un +50% vertical en semanas pide más recorte —en la fuerza— que uno
+  construido en años) y el carácter del nombre. Un compounder con tesis intacta se
+  deja correr aunque pase el 50%.
 - Cuidado con el **solapamiento**: sumar a un "shovel" no es sumar uno nuevo (ej:
   AMD profundiza la apuesta GPU que ya está en NVDA). Decilo.
 
