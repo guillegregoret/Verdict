@@ -14,6 +14,7 @@ from ..config import Settings
 from ..logging import get_logger
 from ..planning.format import format_plan
 from ..planning.models import DeploymentPlan
+from .context_docs import load_context_docs
 from .models import PortfolioReviewContext, ReasoningContext, Suggestion
 
 logger = get_logger(__name__)
@@ -320,6 +321,17 @@ class AnthropicReasoner:
                 max_retries=settings.anthropic_max_retries,
             )
 
+    def _system(self, base: str) -> str:
+        """System prompt + contexto extra del usuario (.md), leído por llamada.
+
+        Se lee en cada consulta a propósito: así editás los .md sin rebuildear.
+        Los archivos son locales y chicos, el costo de I/O es despreciable.
+        """
+        return base + load_context_docs(
+            self._settings.strategy_context_dir,
+            self._settings.strategy_context_max_chars,
+        )
+
     def generate(self, context: ReasoningContext) -> Suggestion:
         user_prompt = (
             "Analizá esta señal y sugerí qué hacer:\n\n"
@@ -329,7 +341,7 @@ class AnthropicReasoner:
             resp = self._client.messages.create(
                 model=self._settings.anthropic_model,
                 max_tokens=400,
-                system=_SYSTEM_PROMPT,
+                system=self._system(_SYSTEM_PROMPT),
                 messages=[{"role": "user", "content": user_prompt}],
             )
         except Exception as exc:  # noqa: BLE001 - normalizamos errores del SDK
@@ -355,7 +367,7 @@ class AnthropicReasoner:
             resp = self._client.messages.create(
                 model=self._settings.anthropic_model,
                 max_tokens=2000,
-                system=_REVIEW_SYSTEM_PROMPT,
+                system=self._system(_REVIEW_SYSTEM_PROMPT),
                 messages=[{"role": "user", "content": _review_user_prompt(context)}],
             )
         except Exception as exc:  # noqa: BLE001 - normalizamos errores del SDK
@@ -379,7 +391,7 @@ class AnthropicReasoner:
             resp = self._client.messages.create(
                 model=self._settings.anthropic_model,
                 max_tokens=1500,
-                system=_PLAN_SYSTEM_PROMPT,
+                system=self._system(_PLAN_SYSTEM_PROMPT),
                 messages=[{"role": "user", "content": _plan_user_prompt(plan)}],
             )
         except Exception as exc:  # noqa: BLE001 - normalizamos errores del SDK

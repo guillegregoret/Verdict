@@ -101,11 +101,17 @@ class Settings(BaseSettings):
 
     # ── Anthropic (razonamiento) ─────────────────────────────────────────────
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-opus-4-8"
+    anthropic_model: str = "claude-opus-5"
     # Reintentos del SDK ante 429/5xx/529 (overloaded). El default del SDK es 2 y
     # con backoff corto perdimos un /reevaluar por un 529 puntual. Subimos el margen
     # (el SDK aplica backoff exponencial con jitter); es una llamada, no un loop.
     anthropic_max_retries: int = 5
+    # Contexto extra del usuario (estrategia/tesis/preferencias): se leen los .md
+    # de esta carpeta y se anexan al system prompt de generate/review/plan. Montada
+    # como volumen para editar sin rebuild. Vacío o inexistente = sin contexto extra.
+    strategy_context_dir: str = "/app/context"
+    # Tope de caracteres del contexto extra (evita prompts gigantes por accidente).
+    strategy_context_max_chars: int = 24000
 
     # ── Telegram (notificaciones) ────────────────────────────────────────────
     telegram_bot_token: str = ""

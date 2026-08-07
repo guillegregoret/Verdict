@@ -94,6 +94,10 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    volumes:
+      # Contexto extra del usuario (.md de estrategia/tesis): read-only, se anexa
+      # al system prompt de generate/review/plan. Editable sin rebuild.
+      - ./context:/app/context:ro
 
   # ── Uptime Kuma: monitoreo HTTP/TCP de APIs, gateway y app ──────────────────
   uptime-kuma:
