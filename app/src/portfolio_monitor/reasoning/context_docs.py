@@ -37,7 +37,13 @@ def load_context_docs(dir_path: str, max_chars: int) -> str:
         base = Path(dir_path)
         if not base.is_dir():
             return ""
-        files = sorted(base.glob("*.md"))
+        # README.md documenta la carpeta y los archivos con prefijo `_` son notas
+        # que el usuario no quiere en el prompt: se excluyen de la inyección.
+        files = sorted(
+            f
+            for f in base.glob("*.md")
+            if f.name.lower() != "readme.md" and not f.name.startswith("_")
+        )
         if not files:
             return ""
         parts: list[str] = []

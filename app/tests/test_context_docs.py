@@ -30,6 +30,18 @@ def test_reads_and_orders_md_files(tmp_path: Path) -> None:
     assert "## 00-a" in out and "## 10-b" in out  # encabezado por archivo
 
 
+def test_readme_and_underscore_files_are_excluded(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text("doc de la carpeta", encoding="utf-8")
+    (tmp_path / "_notas.md").write_text("notas privadas", encoding="utf-8")
+    (tmp_path / "20-real.md").write_text("contexto real", encoding="utf-8")
+
+    out = load_context_docs(str(tmp_path), 10000)
+
+    assert "contexto real" in out
+    assert "doc de la carpeta" not in out  # README excluido
+    assert "notas privadas" not in out  # prefijo _ excluido
+
+
 def test_blank_files_are_skipped(tmp_path: Path) -> None:
     (tmp_path / "vacio.md").write_text("   \n", encoding="utf-8")
     assert load_context_docs(str(tmp_path), 10000) == ""
